@@ -1,41 +1,74 @@
 use living_world::events::WorldEvent;
 use living_world::ids::RouteId;
+use living_world::materials::{self, MaterialId};
 use living_world::simulation::{SimulationConfig, WorldSimulator};
 use living_world::structures::{
-    apply_impact, apply_repair, apply_sustained_load, BridgeStructure, CrossingSafety,
+    apply_impact, apply_repair, apply_sustained_load, apply_targeted_impact,
+    BridgeStructure, ComponentId, ComponentRole, CrossingSafety,
 };
 use living_world::world::initial_world;
 use living_world::world_action::{Actor, ScheduledAction, WorldAction};
 
+fn deck_only_bridge(material: MaterialId, integrity: u32) -> BridgeStructure {
+    let mut bridge = BridgeStructure::stoneford(RouteId(0));
+    for c in &mut bridge.components {
+        if c.role == ComponentRole::Deck {
+            c.material = material;
+            c.integrity = integrity;
+        } else {
+            c.integrity = INTEGRITY_MAX;
+        }
+    }
+    bridge
+}
+
+const INTEGRITY_MAX: u32 = living_world::structures::INTEGRITY_MAX;
+
 #[test]
-fn oak_tougher_than_oak_under_same_impact() {
-    let mut soft = BridgeStructure::stoneford(RouteId(0));
-    for c in &mut soft.components {
-        if c.name.contains("deck") {
-            c.material = living_world::materials::MaterialId::Oak;
-            c.integrity = 800;
-        }
-    }
-    let mut hard = soft.clone();
-    for c in &mut hard.components {
-        if c.name.contains("north") {
-            c.material = living_world::materials::MaterialId::Limestone;
-            c.integrity = 800;
-        }
-    }
-    let o1 = apply_impact(&mut soft, 200);
-    let o2 = apply_impact(&mut hard, 200);
-    let loss_soft: u32 = o1
-        .component_changes
+fn tougher_material_loses_less_on_same_impact() {
+    let mut oak_deck = deck_only_bridge(MaterialId::Oak, 800);
+    let mut iron_deck = deck_only_bridge(MaterialId::Iron, 800);
+    let force = 200;
+    let oak_before = oak_deck.component(ComponentId::Deck).integrity;
+    let iron_before = iron_deck.component(ComponentId::Deck).integrity;
+    apply_targeted_impact(&mut oak_deck, force, ComponentId::Deck);
+    apply_targeted_impact(&mut iron_deck, force, ComponentId::Deck);
+    let oak_loss = oak_before - oak_deck.component(ComponentId::Deck).integrity;
+    let iron_loss = iron_before - iron_deck.component(ComponentId::Deck).integrity;
+    assert!(
+        oak_loss > iron_loss,
+        "oak loss {oak_loss} should exceed iron loss {iron_loss}"
+    );
+}
+
+#[test]
+fn daily_traffic_load_adds_stress_at_12_units() {
+    let mut bridge = BridgeStructure::stoneford(RouteId(0));
+    let before_stress: u32 = bridge
+        .components
         .iter()
-        .map(|c| c.integrity_before - c.integrity_after)
+        .map(|c| c.accumulated_stress)
         .sum();
-    let loss_hard: u32 = o2
-        .component_changes
+    let outcome = apply_sustained_load(&mut bridge, 12);
+    assert!(outcome.applied);
+    let after_stress: u32 = bridge
+        .components
         .iter()
-        .map(|c| c.integrity_before - c.integrity_after)
+        .map(|c| c.accumulated_stress)
         .sum();
-    assert!(loss_soft >= loss_hard || o1.component_changes.len() >= o2.component_changes.len());
+    assert!(
+        after_stress > before_stress,
+        "expected stress accumulation from ordinary load"
+    );
+}
+
+#[test]
+fn weather_decay_differs_by_material() {
+    let oak = materials::weather_decay(materials::material(MaterialId::Oak));
+    let limestone = materials::weather_decay(materials::material(MaterialId::Limestone));
+    let iron = materials::weather_decay(materials::material(MaterialId::Iron));
+    assert!(oak >= limestone, "oak {oak} vs limestone {limestone}");
+    assert!(oak > iron || limestone != iron, "materials should not all match");
 }
 
 #[test]
@@ -148,6 +181,21 @@ fn repeated_load_differs_with_prior_damage() {
 }
 
 #[test]
+fn snapshot_distinguishes_component_state() {
+    let mut a = BridgeStructure::stoneford(RouteId(0));
+    let b = BridgeStructure::stoneford(RouteId(0));
+    apply_targeted_impact(&mut a, 150, ComponentId::Deck);
+    let mut world_a = initial_world();
+    let mut world_b = initial_world();
+    world_a.bridge_structure = a;
+    world_b.bridge_structure = b;
+    let log = living_world::events::EventLog::new();
+    let sa = living_world::snapshot::canonical_snapshot_from(&world_a, &log);
+    let sb = living_world::snapshot::canonical_snapshot_from(&world_b, &log);
+    assert_ne!(sa.bridge_components, sb.bridge_components);
+}
+
+#[test]
 fn deterministic_structure_digest_includes_bridge() {
     let mut a = WorldSimulator::new(
         initial_world(),
@@ -175,5 +223,15 @@ fn deterministic_structure_digest_includes_bridge() {
     let sb = living_world::snapshot::canonical_snapshot(&b);
     assert_eq!(sa.bridge_integrity, sb.bridge_integrity);
     assert_eq!(sa.bridge_safety, sb.bridge_safety);
+    assert_eq!(sa.bridge_components, sb.bridge_components);
     assert_eq!(sa, sb);
+}
+
+#[test]
+fn targeted_impact_hits_primary_more_than_distant_support() {
+    let mut bridge = BridgeStructure::stoneford(RouteId(0));
+    apply_targeted_impact(&mut bridge, 300, ComponentId::Deck);
+    let deck_loss = INTEGRITY_MAX - bridge.component(ComponentId::Deck).integrity;
+    let pier_loss = INTEGRITY_MAX - bridge.component(ComponentId::NorthSupport).integrity;
+    assert!(deck_loss > pier_loss);
 }

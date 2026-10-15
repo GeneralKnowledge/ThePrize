@@ -62,18 +62,22 @@ pub fn impact_damage(material: MaterialDef, force: u32, current_integrity: u32) 
     raw.max(1).min(current_integrity)
 }
 
-pub fn load_stress(material: MaterialDef, load_units: u32, current_integrity: u32) -> u32 {
-    if load_units == 0 {
+/// Daily traffic stress on one component. `role_share` weights deck vs pier vs truss (see interactions).
+/// Calibrated so `load_units = 12` (normal bridge traffic) adds ~3–8 stress/day depending on material.
+pub fn load_stress(
+    material: MaterialDef,
+    load_units: u32,
+    role_share: u32,
+    current_integrity: u32,
+) -> u32 {
+    if load_units == 0 || role_share == 0 {
         return 0;
     }
-    let capacity = material.toughness.saturating_mul(8).saturating_add(200);
-    if load_units <= capacity / 10 {
-        return 0;
-    }
-    let excess = load_units.saturating_sub(capacity / 10);
-    let stress = excess.saturating_mul(100) / (material.toughness + material.hardness);
+    let flex = material.toughness.saturating_add(material.hardness / 2).max(1);
+    let on_component = load_units.saturating_mul(role_share) / 4;
+    let base = on_component.saturating_mul(48) / flex;
     let worn_factor = 1 + (1000 - current_integrity.min(1000)) / 250;
-    (stress * worn_factor).max(0).min(40)
+    (base.saturating_mul(worn_factor)).max(1).min(28)
 }
 
 pub fn repair_restoration(material: MaterialDef, labor: u32, supplies: u32) -> u32 {
@@ -82,6 +86,8 @@ pub fn repair_restoration(material: MaterialDef, labor: u32, supplies: u32) -> u
     work.saturating_add(supply).min(120)
 }
 
+/// Weekly environmental integrity loss (material-specific; slow enough for ~1yr baseline viability).
 pub fn weather_decay(material: MaterialDef) -> u32 {
-    (120u32.saturating_sub(material.weather_resistance) / 15).max(0).min(3)
+    let raw = 1 + (85u32.saturating_sub(material.weather_resistance)) / 22;
+    raw.max(1).min(5)
 }

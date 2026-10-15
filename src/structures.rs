@@ -1,5 +1,9 @@
 use crate::ids::RouteId;
-use crate::materials::{self, MaterialId};
+use crate::interactions::{
+    resolve_bridge, BridgeInteractionInput, ImpactInput, LoadInput, RepairInput,
+    StructureInteractionKind,
+};
+use crate::materials::MaterialId;
 use serde::{Deserialize, Serialize};
 
 pub const INTEGRITY_MAX: u32 = 1000;
@@ -11,7 +15,8 @@ pub enum ComponentRole {
     Connection,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Debug)]
+#[repr(u8)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Debug)]
 pub enum ComponentId {
     Deck = 0,
     NorthSupport = 1,
@@ -187,98 +192,45 @@ pub struct StructureInteractionOutcome {
 }
 
 pub fn apply_impact(bridge: &mut BridgeStructure, force: u32) -> StructureInteractionOutcome {
-    let before = bridge.crossing_safety();
-    let mut changes = vec![];
-    for component in &mut bridge.components {
-        let mat = materials::material(component.material);
-        let loss = materials::impact_damage(mat, force, component.integrity);
-        if loss == 0 {
-            continue;
-        }
-        let before_i = component.integrity;
-        component.integrity = component.integrity.saturating_sub(loss);
-        changes.push(ComponentChange {
-            component: component.id,
-            integrity_before: before_i,
-            integrity_after: component.integrity,
-            stress_added: 0,
-        });
-    }
-    let after = bridge.crossing_safety();
-    StructureInteractionOutcome {
-        applied: !changes.is_empty(),
-        explanation: format!("impact force {force} on {}", bridge.name),
-        safety_before: before,
-        safety_after: after,
-        component_changes: changes,
-    }
+    resolve_bridge(
+        bridge,
+        StructureInteractionKind::Impact,
+        BridgeInteractionInput::Impact(ImpactInput {
+            force,
+            primary_target: None,
+        }),
+    )
+}
+
+pub fn apply_targeted_impact(
+    bridge: &mut BridgeStructure,
+    force: u32,
+    target: ComponentId,
+) -> StructureInteractionOutcome {
+    resolve_bridge(
+        bridge,
+        StructureInteractionKind::Impact,
+        BridgeInteractionInput::Impact(ImpactInput {
+            force,
+            primary_target: Some(target),
+        }),
+    )
 }
 
 pub fn apply_sustained_load(bridge: &mut BridgeStructure, load_units: u32) -> StructureInteractionOutcome {
-    let before = bridge.crossing_safety();
-    let mut changes = vec![];
-    for component in &mut bridge.components {
-        let mat = materials::material(component.material);
-        let stress = materials::load_stress(mat, load_units, component.integrity);
-        if stress == 0 {
-            continue;
-        }
-        component.accumulated_stress = component.accumulated_stress.saturating_add(stress);
-        let loss = if component.accumulated_stress >= 100 {
-            let convert = component.accumulated_stress / 10;
-            component.accumulated_stress %= 10;
-            convert
-        } else {
-            0
-        };
-        if loss == 0 {
-            continue;
-        }
-        let before_i = component.integrity;
-        component.integrity = component.integrity.saturating_sub(loss.min(before_i));
-        changes.push(ComponentChange {
-            component: component.id,
-            integrity_before: before_i,
-            integrity_after: component.integrity,
-            stress_added: stress,
-        });
-    }
-    let after = bridge.crossing_safety();
-    StructureInteractionOutcome {
-        applied: !changes.is_empty(),
-        explanation: format!("sustained load {load_units}"),
-        safety_before: before,
-        safety_after: after,
-        component_changes: changes,
-    }
+    resolve_bridge(
+        bridge,
+        StructureInteractionKind::SustainedLoad,
+        BridgeInteractionInput::Load(LoadInput { load_units }),
+    )
 }
 
 pub fn apply_weather(bridge: &mut BridgeStructure) -> StructureInteractionOutcome {
-    let before = bridge.crossing_safety();
-    let mut changes = vec![];
-    for component in &mut bridge.components {
-        let mat = materials::material(component.material);
-        let loss = materials::weather_decay(mat);
-        if loss == 0 {
-            continue;
-        }
-        let before_i = component.integrity;
-        component.integrity = component.integrity.saturating_sub(loss.min(before_i));
-        changes.push(ComponentChange {
-            component: component.id,
-            integrity_before: before_i,
-            integrity_after: component.integrity,
-            stress_added: 0,
-        });
-    }
-    let after = bridge.crossing_safety();
-    StructureInteractionOutcome {
-        applied: !changes.is_empty(),
-        explanation: "environmental wear".into(),
-        safety_before: before,
-        safety_after: after,
-        component_changes: changes,
-    }
+    resolve_bridge(
+        bridge,
+        StructureInteractionKind::EnvironmentalWear,
+        BridgeInteractionInput::Weather,
+    )
 }
 
 pub fn apply_repair(
@@ -287,57 +239,15 @@ pub fn apply_repair(
     timber: u32,
     stone: u32,
 ) -> StructureInteractionOutcome {
-    let before = bridge.crossing_safety();
-    let mut changes = vec![];
-    let targets: Vec<ComponentId> = bridge
-        .components
-        .iter()
-        .filter(|c| c.integrity < INTEGRITY_MAX)
-        .map(|c| c.id)
-        .collect();
-    if targets.is_empty() {
-        return StructureInteractionOutcome {
-            applied: false,
-            explanation: "nothing to repair".into(),
-            safety_before: before,
-            safety_after: before,
-            component_changes: vec![],
-        };
-    }
-    let per = targets.len() as u32;
-    let timber_each = timber / per;
-    let stone_each = stone / per;
-    let labor_each = labor / per;
-    for id in targets {
-        let component = bridge.component_mut(id);
-        let mat = materials::material(component.material);
-        let supplies = match component.material {
-            MaterialId::Oak => timber_each,
-            MaterialId::Limestone => stone_each,
-            MaterialId::Iron => timber_each / 2 + stone_each / 2,
-        };
-        let gain = materials::repair_restoration(mat, labor_each, supplies);
-        if gain == 0 {
-            continue;
-        }
-        let before_i = component.integrity;
-        component.integrity = (component.integrity + gain).min(INTEGRITY_MAX);
-        component.accumulated_stress = component.accumulated_stress.saturating_sub(gain / 2);
-        changes.push(ComponentChange {
-            component: id,
-            integrity_before: before_i,
-            integrity_after: component.integrity,
-            stress_added: 0,
-        });
-    }
-    let after = bridge.crossing_safety();
-    StructureInteractionOutcome {
-        applied: !changes.is_empty(),
-        explanation: format!("repair labour {labor} timber {timber} stone {stone}"),
-        safety_before: before,
-        safety_after: after,
-        component_changes: changes,
-    }
+    resolve_bridge(
+        bridge,
+        StructureInteractionKind::Repair,
+        BridgeInteractionInput::Repair(RepairInput {
+            labor,
+            timber,
+            stone,
+        }),
+    )
 }
 
 pub fn sync_route_from_structure(

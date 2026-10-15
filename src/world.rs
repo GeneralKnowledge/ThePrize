@@ -18,6 +18,10 @@ pub struct Settlement {
     pub market: MarketState,
     /// Abstract employer/tax float used to pay local wages (not yet a full treasury sim).
     pub treasury_coin: u32,
+    /// Construction timber stock (abstract units) for bridge/build repairs.
+    pub construction_timber: u32,
+    /// Construction stone stock (abstract units) for bridge/build repairs.
+    pub construction_stone: u32,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -150,6 +154,8 @@ pub fn initial_world() -> WorldState {
                     desired_grain_stock: 100,
                 },
                 treasury_coin: 240,
+                construction_timber: 320,
+                construction_stone: 240,
             },
             Settlement {
                 id: town,
@@ -163,6 +169,8 @@ pub fn initial_world() -> WorldState {
                     desired_grain_stock: 55,
                 },
                 treasury_coin: 180,
+                construction_timber: 80,
+                construction_stone: 120,
             },
         ],
         routes: vec![Route {

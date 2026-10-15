@@ -2,6 +2,7 @@ pub mod consequences;
 pub mod economy;
 pub mod events;
 pub mod history;
+pub mod interactions;
 pub mod ids;
 pub mod invariants;
 pub mod ledger;

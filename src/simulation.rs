@@ -175,11 +175,21 @@ impl WorldSimulator {
             return;
         }
         let village = SettlementId(0);
-        let material_cost = 14u32;
-        if self.world.settlement(village).treasury_coin < material_cost {
+        const COIN_COST: u32 = 14;
+        const TIMBER_COST: u32 = 8;
+        const STONE_COST: u32 = 6;
+        const LABOR: u32 = 12;
+        let settlement = self.world.settlement(village);
+        if settlement.treasury_coin < COIN_COST
+            || settlement.construction_timber < TIMBER_COST
+            || settlement.construction_stone < STONE_COST
+        {
             return;
         }
-        self.world.settlement_mut(village).treasury_coin -= material_cost;
+        let settlement = self.world.settlement_mut(village);
+        settlement.treasury_coin -= COIN_COST;
+        settlement.construction_timber -= TIMBER_COST;
+        settlement.construction_stone -= STONE_COST;
         let parent = self
             .log
             .events_of_kind(|e| matches!(e, WorldEvent::BridgeRepairStarted { .. }))
@@ -187,9 +197,9 @@ impl WorldSimulator {
             .map(|r| r.cause);
         let outcome = crate::structures::apply_repair(
             &mut self.world.bridge_structure,
-            12,
-            8,
-            6,
+            LABOR,
+            TIMBER_COST,
+            STONE_COST,
         );
         let (_, cause) = self.log.emit(
             self.world.day,
@@ -210,7 +220,7 @@ impl WorldSimulator {
         let passable = self.world.bridge_structure.bridge_passable();
         let route = self.world.route_mut(route_id);
         route.repair_progress += 1;
-        if passable && route.repair_progress >= route.repair_days_required {
+        if passable || route.repair_progress >= route.repair_days_required {
             route.repair_in_progress = false;
             route.repair_progress = 0;
         }

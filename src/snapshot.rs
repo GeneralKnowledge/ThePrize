@@ -1,6 +1,7 @@
 use crate::events::EventLog;
 use crate::history::canonical_history_digest;
 use crate::simulation::WorldSimulator;
+use crate::structures::ComponentId;
 use crate::world::{MerchantLocation, WorldState};
 use serde::Serialize;
 use std::hash::{Hash, Hasher};
@@ -23,6 +24,8 @@ pub struct SettlementSnapshot {
     pub grain: u32,
     pub treasury: u32,
     pub price_bits: u64,
+    pub construction_timber: u32,
+    pub construction_stone: u32,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
@@ -42,6 +45,15 @@ pub struct RouteSnapshot {
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+pub struct StructuralComponentSnapshot {
+    pub component_id: u8,
+    pub material: u8,
+    pub role: u8,
+    pub integrity: u32,
+    pub accumulated_stress: u32,
+}
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 pub struct CanonicalSnapshot {
     pub day: u32,
     pub settlements: Vec<SettlementSnapshot>,
@@ -52,6 +64,49 @@ pub struct CanonicalSnapshot {
     pub event_count: u32,
     pub bridge_integrity: u32,
     pub bridge_safety: String,
+    pub bridge_components: Vec<StructuralComponentSnapshot>,
+}
+
+pub fn bridge_component_snapshots(world: &WorldState) -> Vec<StructuralComponentSnapshot> {
+    let mut out: Vec<_> = world
+        .bridge_structure
+        .components
+        .iter()
+        .map(|c| StructuralComponentSnapshot {
+            component_id: component_id_discriminant(c.id),
+            material: material_discriminant(c.material),
+            role: role_discriminant(c.role),
+            integrity: c.integrity,
+            accumulated_stress: c.accumulated_stress,
+        })
+        .collect();
+    out.sort_by_key(|c| c.component_id);
+    out
+}
+
+fn component_id_discriminant(id: ComponentId) -> u8 {
+    match id {
+        ComponentId::Deck => 0,
+        ComponentId::NorthSupport => 1,
+        ComponentId::SouthSupport => 2,
+        ComponentId::TrussEast => 3,
+    }
+}
+
+fn material_discriminant(m: crate::materials::MaterialId) -> u8 {
+    match m {
+        crate::materials::MaterialId::Oak => 0,
+        crate::materials::MaterialId::Limestone => 1,
+        crate::materials::MaterialId::Iron => 2,
+    }
+}
+
+fn role_discriminant(r: crate::structures::ComponentRole) -> u8 {
+    match r {
+        crate::structures::ComponentRole::Deck => 0,
+        crate::structures::ComponentRole::Support => 1,
+        crate::structures::ComponentRole::Connection => 2,
+    }
 }
 
 pub fn canonical_snapshot(sim: &WorldSimulator) -> CanonicalSnapshot {
@@ -68,6 +123,8 @@ pub fn canonical_snapshot_from(world: &WorldState, log: &EventLog) -> CanonicalS
             grain: s.grain_inventory,
             treasury: s.treasury_coin,
             price_bits: s.market.grain_price.to_bits(),
+            construction_timber: s.construction_timber,
+            construction_stone: s.construction_stone,
         })
         .collect();
     settlements.sort_by_key(|s| s.id);
@@ -131,6 +188,7 @@ pub fn canonical_snapshot_from(world: &WorldState, log: &EventLog) -> CanonicalS
         event_count: log.records.len() as u32,
         bridge_integrity: world.bridge_structure.aggregate_integrity(),
         bridge_safety: format!("{:?}", world.bridge_structure.crossing_safety()),
+        bridge_components: bridge_component_snapshots(world),
     }
 }
 

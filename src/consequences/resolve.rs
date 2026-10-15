@@ -60,7 +60,11 @@ fn damage_bridge(
         Actor::Player => 880,
         Actor::Npc(_) => 280,
     };
-    let outcome = crate::structures::apply_impact(&mut sim.world.bridge_structure, force);
+    let outcome = crate::structures::apply_targeted_impact(
+        &mut sim.world.bridge_structure,
+        force,
+        crate::structures::ComponentId::Deck,
+    );
     let severity = (1000u32.saturating_sub(sim.world.bridge_structure.aggregate_integrity()) / 10)
         .min(100);
     sim.log.emit(

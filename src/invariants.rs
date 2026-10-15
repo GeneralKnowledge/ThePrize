@@ -128,6 +128,15 @@ fn check_entity_identity(world: &WorldState, report: &mut ValidationReport) {
 
 fn check_inventories_and_money(world: &WorldState, report: &mut ValidationReport) {
     for s in &world.settlements {
+        if s.construction_timber > 1_000_000 || s.construction_stone > 1_000_000 {
+            report.push_warning(
+                "construction_stock_high",
+                format!(
+                    "{} timber {} stone {}",
+                    s.name, s.construction_timber, s.construction_stone
+                ),
+            );
+        }
         if s.grain_inventory > 10_000_000 {
             report.push_warning(
                 "grain_suspiciously_high",

@@ -24,14 +24,26 @@ pub fn persist_run(path: &Path, run: &RunPersistence<'_>) -> rusqlite::Result<()
         CREATE TABLE run_meta (
             scenario TEXT NOT NULL,
             seed INTEGER NOT NULL,
-            final_day INTEGER NOT NULL
+            final_day INTEGER NOT NULL,
+            bridge_route_id INTEGER,
+            bridge_name TEXT
         );
         CREATE TABLE settlements (
             id INTEGER NOT NULL,
             name TEXT NOT NULL,
             population INTEGER NOT NULL,
             grain INTEGER NOT NULL,
-            grain_price REAL NOT NULL
+            grain_price REAL NOT NULL,
+            construction_timber INTEGER NOT NULL,
+            construction_stone INTEGER NOT NULL
+        );
+        CREATE TABLE bridge_components (
+            component_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            material TEXT NOT NULL,
+            role TEXT NOT NULL,
+            integrity INTEGER NOT NULL,
+            accumulated_stress INTEGER NOT NULL
         );
         CREATE TABLE events (
             id INTEGER NOT NULL,
@@ -54,23 +66,41 @@ pub fn persist_run(path: &Path, run: &RunPersistence<'_>) -> rusqlite::Result<()
     )?;
 
     conn.execute(
-        "INSERT INTO run_meta (scenario, seed, final_day) VALUES (?1, ?2, ?3)",
+        "INSERT INTO run_meta (scenario, seed, final_day, bridge_route_id, bridge_name) VALUES (?1, ?2, ?3, ?4, ?5)",
         params![
             format!("{:?}", run.scenario),
             run.seed as i64,
-            run.world.day as i64
+            run.world.day as i64,
+            run.world.bridge_structure.route_id.0 as i64,
+            run.world.bridge_structure.name,
         ],
     )?;
 
     for s in &run.world.settlements {
         conn.execute(
-            "INSERT INTO settlements (id, name, population, grain, grain_price) VALUES (?1, ?2, ?3, ?4, ?5)",
+            "INSERT INTO settlements (id, name, population, grain, grain_price, construction_timber, construction_stone) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![
                 s.id.0 as i64,
                 s.name,
                 s.population as i64,
                 s.grain_inventory as i64,
-                s.market.grain_price
+                s.market.grain_price,
+                s.construction_timber as i64,
+                s.construction_stone as i64,
+            ],
+        )?;
+    }
+
+    for c in &run.world.bridge_structure.components {
+        conn.execute(
+            "INSERT INTO bridge_components (component_id, name, material, role, integrity, accumulated_stress) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                (c.id as u8) as i64,
+                c.name,
+                format!("{:?}", c.material),
+                format!("{:?}", c.role),
+                c.integrity as i64,
+                c.accumulated_stress as i64,
             ],
         )?;
     }
