@@ -87,6 +87,7 @@ fn make_npc(
         beliefs: vec![],
         memories: vec![],
         worked_today: false,
+        alive: true,
         last_decision: None,
     }
 }

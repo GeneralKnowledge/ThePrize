@@ -70,6 +70,7 @@ pub struct Npc {
     pub beliefs: Vec<String>,
     pub memories: Vec<MemoryEntry>,
     pub worked_today: bool,
+    pub alive: bool,
     pub last_decision: Option<RecordedDecision>,
 }
 
@@ -101,7 +102,7 @@ pub fn sync_settlement_population(world: &mut crate::world::WorldState) {
         let count = world
             .npcs
             .iter()
-            .filter(|n| n.home == settlement.id)
+            .filter(|n| n.alive && n.home == settlement.id)
             .count() as u32;
         settlement.population = count.max(1);
     }

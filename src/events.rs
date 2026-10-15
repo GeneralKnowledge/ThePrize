@@ -1,5 +1,6 @@
-use crate::ids::{CauseId, EventId, EventRecordId, PersonId, RouteId, SettlementId};
+use crate::ids::{CauseId, EventId, EventRecordId, PersonId, PropertyId, RouteId, SettlementId};
 use crate::npc::{DecisionReason, Job};
+use crate::world_action::{Actor, WorldAction};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Debug)]
@@ -108,6 +109,46 @@ pub enum WorldEvent {
     },
     NpcStarving {
         person: PersonId,
+    },
+    ActionAttempted {
+        action: WorldAction,
+    },
+    StructureDamaged {
+        route: Option<RouteId>,
+        property: Option<PropertyId>,
+        actor: Actor,
+        severity: u32,
+        cause: CauseId,
+    },
+    TheftCommitted {
+        thief: Actor,
+        settlement: SettlementId,
+        good: GoodId,
+        quantity: u32,
+        cause: CauseId,
+    },
+    PersonDied {
+        person: PersonId,
+        location: SettlementId,
+        killer: Actor,
+        cause: CauseId,
+    },
+    OwnershipTransferred {
+        property: PropertyId,
+        from: PersonId,
+        to: PersonId,
+        cause: CauseId,
+    },
+    RelationshipChanged {
+        source: PersonId,
+        target: PersonId,
+        change: RelationshipChange,
+        cause: CauseId,
+    },
+    RumourSpread {
+        settlement: SettlementId,
+        topic: String,
+        cause: CauseId,
     },
 }
 

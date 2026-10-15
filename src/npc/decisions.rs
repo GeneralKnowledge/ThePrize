@@ -2,7 +2,9 @@ use crate::events::{EventLog, WorldEvent};
 use crate::ids::{PersonId, SettlementId};
 use crate::npc::{Job, Npc, NpcPresence};
 use crate::npc::types::{DecisionReason, NpcAction, RecordedDecision};
+use crate::property::mill_operational;
 use crate::world::WorldState;
+use crate::world_action::{Actor, WorldAction};
 
 #[derive(Clone, Copy, Debug)]
 struct Choice {
@@ -22,6 +24,9 @@ pub fn run_npc_decisions(world: &mut WorldState, log: &mut EventLog) {
     order.sort_by_key(|id| id.0);
 
     for person_id in order {
+        if !world.npc(person_id).alive {
+            continue;
+        }
         let choice = {
             let npc = world.npc(person_id);
             evaluate(npc, world)
@@ -31,6 +36,14 @@ pub fn run_npc_decisions(world: &mut WorldState, log: &mut EventLog) {
 }
 
 fn evaluate(npc: &Npc, world: &WorldState) -> Choice {
+    if !npc.alive {
+        return Choice {
+            action: NpcAction::Idle,
+            reason: DecisionReason::Rested,
+            score: 0,
+            detail: "deceased",
+        };
+    }
     let mut choices = vec![];
 
     if matches!(npc.presence, NpcPresence::Travelling { .. }) {
@@ -51,6 +64,17 @@ fn evaluate(npc: &Npc, world: &WorldState) -> Choice {
             score: (npc.hunger * 300.0) as i32 + 200,
             detail: "eat from personal stores",
         });
+    }
+
+    if npc.hunger > 0.88 && npc.grain == 0 && npc.coin == 0 {
+        if npc.location().is_some() {
+            choices.push(Choice {
+                action: NpcAction::StealFood,
+                reason: DecisionReason::DesperateTheft,
+                score: 480,
+                detail: "steal grain out of desperation",
+            });
+        }
     }
 
     if npc.hunger >= 0.45 {
@@ -207,6 +231,15 @@ fn apply_decision(
         NpcAction::Work => execute_work(world, log, person_id, day, choice.reason),
         NpcAction::Travel => execute_travel(world, log, person_id, day, choice.reason),
         NpcAction::WaitOutTravel => advance_travel(world, log, person_id, day),
+        NpcAction::StealFood => {
+            if let Some(loc) = world.npc(person_id).location() {
+                world.pending_actions.push(WorldAction::StealSettlementGrain {
+                    thief: Actor::Npc(person_id),
+                    settlement: loc,
+                    quantity: 8,
+                });
+            }
+        }
         NpcAction::Idle => {}
     }
 }
@@ -218,6 +251,10 @@ fn execute_work(
     day: u32,
     reason: DecisionReason,
 ) {
+    let job = world.npc(person_id).job;
+    if job == Job::Miller && !mill_operational(world) {
+        return;
+    }
     let npc = world.npc_mut(person_id);
     let loc = match npc.location() {
         Some(s) => s,
@@ -332,7 +369,7 @@ fn advance_travel(world: &mut WorldState, log: &mut EventLog, person_id: PersonI
 pub fn tick_npc_hunger(world: &mut WorldState, log: &mut EventLog) {
     let day = world.day;
     let rate = world.grain_per_person_per_day as f32 * 0.12;
-    for npc in &mut world.npcs {
+    for npc in world.npcs.iter_mut().filter(|n| n.alive) {
         npc.hunger = (npc.hunger + rate).min(1.0);
         if npc.hunger >= 0.98 {
             log.emit(
@@ -366,7 +403,7 @@ pub fn farmer_work_fraction(world: &WorldState, settlement: SettlementId) -> f64
     let farmers: Vec<_> = world
         .npcs
         .iter()
-        .filter(|n| n.job == Job::Farmer && n.home == settlement)
+        .filter(|n| n.alive && n.job == Job::Farmer && n.home == settlement)
         .collect();
     if farmers.is_empty() {
         return 1.0;

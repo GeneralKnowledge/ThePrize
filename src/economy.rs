@@ -41,6 +41,11 @@ pub fn update_prices(world: &mut WorldState, log: &mut EventLog) {
 
 pub fn run_production(world: &mut WorldState, log: &mut EventLog, season: Season) {
     let mult = season.farm_yield_multiplier();
+    let props = world.properties.clone();
+    for settlement in &mut world.settlements {
+        settlement.farm_daily_capacity = settlement.base_farm_daily_capacity;
+        crate::property::apply_property_effects_to_settlement(settlement, &props);
+    }
     let labor: Vec<(SettlementId, f64)> = world
         .settlements
         .iter()
