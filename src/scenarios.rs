@@ -1,6 +1,6 @@
 use crate::economy::snapshot_settlement;
 use crate::events::{InterventionKind, WorldEvent};
-use crate::history::{ancestors_of, canonical_history_digest, descendants_of, find_cause_for_event};
+use crate::history::{canonical_history_digest, descendants_of, find_cause_for_event};
 use crate::invariants::{validate_world, ViolationSeverity};
 use crate::ledger::{reconcile_grain_conservation, GrainLedger, MoneyLedger};
 use crate::snapshot::{canonical_snapshot, snapshot_digest};
@@ -51,6 +51,21 @@ pub struct ScenarioMetrics {
     pub snapshot_digest: u64,
     pub wages_paid: u64,
     pub npc_market_coin_spent: u64,
+    pub merchant_sales_before_block: u32,
+    pub merchant_sales_after_block: u32,
+    pub merchant_departures_after_block: u32,
+    pub npc_starving_days_before_block: u32,
+    pub npc_starving_days_after_block: u32,
+    pub town_grain_at_block: Option<u32>,
+    pub town_price_at_block: Option<f64>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct WeeklySettlementSample {
+    pub day: u32,
+    pub town_grain: u32,
+    pub town_price: f64,
+    pub village_grain: u32,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -59,6 +74,7 @@ pub struct ScenarioReport {
     pub seed: u64,
     pub metrics: ScenarioMetrics,
     pub causal_summary: Vec<String>,
+    pub bridge_window: Vec<WeeklySettlementSample>,
     pub sqlite_path: Option<String>,
 }
 
@@ -70,13 +86,33 @@ pub fn run_scenario(kind: ScenarioKind, seed: u64, output_dir: Option<&Path>) ->
 
     let mut min_village_grain = u32::MAX;
     let mut min_town_grain = u32::MAX;
+    let mut bridge_window = Vec::new();
+    let window_start = BRIDGE_BLOCK_DAY.saturating_sub(28);
+    let window_end = BRIDGE_BLOCK_DAY + 28;
+    let mut town_grain_at_block: Option<u32> = None;
+    let mut town_price_at_block: Option<f64> = None;
 
     for _ in 0..SIM_DAYS {
         sim.advance_day();
+        let day = sim.world.day;
         let v = sim.world.settlement(crate::ids::SettlementId(0)).grain_inventory;
         let t = sim.world.settlement(crate::ids::SettlementId(1)).grain_inventory;
         min_village_grain = min_village_grain.min(v);
         min_town_grain = min_town_grain.min(t);
+        if day == BRIDGE_BLOCK_DAY {
+            let town = sim.world.settlement(crate::ids::SettlementId(1));
+            town_grain_at_block = Some(town.grain_inventory);
+            town_price_at_block = Some(town.market.grain_price);
+        }
+        if (window_start..=window_end).contains(&day) && day % 7 == 0 {
+            let town = sim.world.settlement(crate::ids::SettlementId(1));
+            bridge_window.push(WeeklySettlementSample {
+                day,
+                town_grain: town.grain_inventory,
+                town_price: town.market.grain_price,
+                village_grain: v,
+            });
+        }
     }
 
     let metrics = compute_metrics(
@@ -85,8 +121,10 @@ pub fn run_scenario(kind: ScenarioKind, seed: u64, output_dir: Option<&Path>) ->
         min_village_grain,
         min_town_grain,
         population_start,
+        town_grain_at_block,
+        town_price_at_block,
     );
-    let causal_summary = summarize_causal_chain(&sim, &opening);
+    let causal_summary = summarize_causal_chain(&sim, &opening, &bridge_window);
 
     let sqlite_path = output_dir.map(|dir| {
         let path = dir.join(format!("{:?}_{}.sqlite", kind, seed));
@@ -105,6 +143,7 @@ pub fn run_scenario(kind: ScenarioKind, seed: u64, output_dir: Option<&Path>) ->
         seed,
         metrics,
         causal_summary,
+        bridge_window,
         sqlite_path,
     }
 }
@@ -160,6 +199,8 @@ fn compute_metrics(
     min_village: u32,
     min_town: u32,
     population_start: u32,
+    town_grain_at_block: Option<u32>,
+    town_price_at_block: Option<f64>,
 ) -> ScenarioMetrics {
     let merchant_transfers = sim
         .log
@@ -249,6 +290,48 @@ fn compute_metrics(
         .events_of_kind(|e| matches!(e, WorldEvent::MerchantTripCancelled { .. }))
         .count() as u32;
 
+    let merchant_sales_before_block = sim
+        .log
+        .records
+        .iter()
+        .filter(|r| {
+            r.day <= BRIDGE_BLOCK_DAY
+                && matches!(r.event, WorldEvent::MerchantSaleCompleted { .. })
+        })
+        .count() as u32;
+    let merchant_sales_after_block = sim
+        .log
+        .records
+        .iter()
+        .filter(|r| {
+            r.day > BRIDGE_BLOCK_DAY
+                && matches!(r.event, WorldEvent::MerchantSaleCompleted { .. })
+        })
+        .count() as u32;
+    let merchant_departures_after_block = sim
+        .log
+        .records
+        .iter()
+        .filter(|r| {
+            r.day > BRIDGE_BLOCK_DAY && matches!(r.event, WorldEvent::MerchantDeparted { .. })
+        })
+        .count() as u32;
+    let npc_starving_days_before_block = sim
+        .log
+        .records
+        .iter()
+        .filter(|r| {
+            r.day <= BRIDGE_BLOCK_DAY && matches!(r.event, WorldEvent::NpcStarving { .. })
+        })
+        .count() as u32;
+    let npc_starving_days_after_block = sim
+        .log
+        .records
+        .iter()
+        .filter(|r| {
+            r.day > BRIDGE_BLOCK_DAY && matches!(r.event, WorldEvent::NpcStarving { .. })
+        })
+        .count() as u32;
     ScenarioMetrics {
         merchant_transfers,
         npc_travel_events,
@@ -278,10 +361,21 @@ fn compute_metrics(
         snapshot_digest: snapshot_digest(&snap),
         wages_paid: money.wages_from_treasury,
         npc_market_coin_spent: money.npc_market_spent,
+        merchant_sales_before_block,
+        merchant_sales_after_block,
+        merchant_departures_after_block,
+        npc_starving_days_before_block,
+        npc_starving_days_after_block,
+        town_grain_at_block,
+        town_price_at_block,
     }
 }
 
-fn summarize_causal_chain(sim: &WorldSimulator, opening: &crate::world::WorldState) -> Vec<String> {
+fn summarize_causal_chain(
+    sim: &WorldSimulator,
+    opening: &crate::world::WorldState,
+    bridge_window: &[WeeklySettlementSample],
+) -> Vec<String> {
     let mut lines = vec![];
     let ledger = GrainLedger::from_event_log(&sim.log);
     lines.push(format!(
@@ -323,23 +417,108 @@ fn summarize_causal_chain(sim: &WorldSimulator, opening: &crate::world::WorldSta
             lines.push("Downstream of block (sample):".into());
             lines.extend(notable);
         }
-        if let Some(transfer) = sim
+        let rumours: Vec<_> = effects
+            .iter()
+            .filter(|l| l.description.contains("RumourSpread"))
+            .map(|l| format!("  day {}: {}", l.day, l.description))
+            .collect();
+        if !rumours.is_empty() {
+            lines.push("Rumour chain from block:".into());
+            lines.extend(rumours);
+        }
+        let post_sales = sim
             .log
-            .events_of_kind(|e| matches!(e, WorldEvent::GoodsTransferred { .. }))
-            .find(|r| r.day > BRIDGE_BLOCK_DAY)
-        {
-            if let Some(anc) = transfer.parent_cause {
-                let chain = ancestors_of(&sim.log, anc);
-                if chain.len() > 1 {
-                    lines.push(format!(
-                        "Sample delivery day {} linked through {} causal steps",
-                        transfer.day,
-                        chain.len()
-                    ));
-                }
-            }
+            .records
+            .iter()
+            .filter(|r| {
+                r.day > BRIDGE_BLOCK_DAY
+                    && matches!(r.event, WorldEvent::MerchantSaleCompleted { .. })
+            })
+            .count();
+        lines.push(format!(
+            "Merchant sales after day {}: {} (baseline expectation: ongoing trade)",
+            BRIDGE_BLOCK_DAY, post_sales
+        ));
+    }
+
+    lines.push(format!(
+        "Trade split at day {}: {} sales before / {} after; {} departures after",
+        BRIDGE_BLOCK_DAY,
+        sim.log
+            .records
+            .iter()
+            .filter(|r| {
+                r.day <= BRIDGE_BLOCK_DAY
+                    && matches!(r.event, WorldEvent::MerchantSaleCompleted { .. })
+            })
+            .count(),
+        sim.log
+            .records
+            .iter()
+            .filter(|r| {
+                r.day > BRIDGE_BLOCK_DAY
+                    && matches!(r.event, WorldEvent::MerchantSaleCompleted { .. })
+            })
+            .count(),
+        sim.log
+            .records
+            .iter()
+            .filter(|r| {
+                r.day > BRIDGE_BLOCK_DAY && matches!(r.event, WorldEvent::MerchantDeparted { .. })
+            })
+            .count()
+    ));
+
+    if !bridge_window.is_empty() {
+        lines.push("Millford weekly (grain, price) around bridge:".into());
+        for sample in bridge_window {
+            lines.push(format!(
+                "  day {}: town {} @ {:.2}, village {}",
+                sample.day, sample.town_grain, sample.town_price, sample.village_grain
+            ));
         }
     }
+
+    let travel_after: u32 = sim
+        .log
+        .records
+        .iter()
+        .filter(|r| {
+            r.day > BRIDGE_BLOCK_DAY && matches!(r.event, WorldEvent::NpcTravelStarted { .. })
+        })
+        .count() as u32;
+    let travel_before: u32 = sim
+        .log
+        .records
+        .iter()
+        .filter(|r| {
+            r.day <= BRIDGE_BLOCK_DAY && matches!(r.event, WorldEvent::NpcTravelStarted { .. })
+        })
+        .count() as u32;
+    lines.push(format!(
+        "NPC travel: {} trips before day {} vs {} after",
+        travel_before, BRIDGE_BLOCK_DAY, travel_after
+    ));
+    let hungry_before = sim
+        .log
+        .records
+        .iter()
+        .filter(|r| {
+            r.day <= BRIDGE_BLOCK_DAY && matches!(r.event, WorldEvent::NpcStarving { .. })
+        })
+        .count();
+    let hungry_after = sim
+        .log
+        .records
+        .iter()
+        .filter(|r| {
+            r.day > BRIDGE_BLOCK_DAY && matches!(r.event, WorldEvent::NpcStarving { .. })
+        })
+        .count();
+    lines.push(format!(
+        "NpcStarving signals: {} before day {} vs {} after",
+        hungry_before, BRIDGE_BLOCK_DAY, hungry_after
+    ));
 
     let departures = sim
         .log

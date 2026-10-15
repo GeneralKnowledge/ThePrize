@@ -49,6 +49,9 @@ pub fn on_route_blocked(world: &mut WorldState, log: &mut EventLog, cause: Cause
 
 pub fn tick_merchant(world: &mut WorldState, log: &mut EventLog, day: u32) {
     let merchant_id = world.merchant.id;
+    if world.bridge_between(VILLAGE, TOWN).expect("bridge").passable {
+        world.merchant.stranded_cancel_emitted = false;
+    }
 
     if let MerchantLocation::Travelling {
         from,
@@ -168,25 +171,43 @@ pub fn tick_merchant(world: &mut WorldState, log: &mut EventLog, day: u32) {
         return;
     }
 
-    if current == TOWN && town_needs_imports && village_can_export && passable {
-        world.merchant.location = MerchantLocation::Travelling {
-            from: TOWN,
-            to: VILLAGE,
-            days_remaining: 1,
-            carrying_grain: 0,
-        };
-        let (_, trip_cause) = log.emit(
-            day,
-            WorldEvent::MerchantDeparted {
+    if current == TOWN {
+        if town_needs_imports && village_can_export && passable {
+            world.merchant.location = MerchantLocation::Travelling {
                 from: TOWN,
                 to: VILLAGE,
-                grain: 0,
-                coin_spent: 0,
-                via_merchant: merchant_id,
-            },
-            None,
-        );
-        world.merchant.active_trip_cause = Some(trip_cause);
+                days_remaining: 1,
+                carrying_grain: 0,
+            };
+            let (_, trip_cause) = log.emit(
+                day,
+                WorldEvent::MerchantDeparted {
+                    from: TOWN,
+                    to: VILLAGE,
+                    grain: 0,
+                    coin_spent: 0,
+                    via_merchant: merchant_id,
+                },
+                None,
+            );
+            world.merchant.active_trip_cause = Some(trip_cause);
+        } else if !passable && town_needs_imports && !world.merchant.stranded_cancel_emitted {
+            let block_cause = log
+                .records
+                .iter()
+                .rev()
+                .find(|r| matches!(r.event, WorldEvent::RouteBlocked { .. }))
+                .map(|r| r.cause);
+            log.emit(
+                day,
+                WorldEvent::MerchantTripCancelled {
+                    reason: "stranded at destination; bridge closed".into(),
+                    cause: block_cause,
+                },
+                block_cause,
+            );
+            world.merchant.stranded_cancel_emitted = true;
+        }
     }
 }
 

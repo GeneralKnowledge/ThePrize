@@ -181,6 +181,24 @@ pub enum WorldEvent {
         person: PersonId,
         amount: u32,
     },
+    StructuralConditionChanged {
+        route: RouteId,
+        safety: String,
+        aggregate_integrity: u32,
+        cause: CauseId,
+    },
+    ComponentIntegrityChanged {
+        route: RouteId,
+        component: String,
+        integrity_before: u32,
+        integrity_after: u32,
+        cause: CauseId,
+    },
+    StructureLoadApplied {
+        route: RouteId,
+        load_units: u32,
+        cause: CauseId,
+    },
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Debug)]

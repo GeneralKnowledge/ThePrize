@@ -1,6 +1,7 @@
 use crate::ids::{CauseId, PersonId, RouteId, SettlementId};
 use crate::npc::Npc;
 use crate::property::Property;
+use crate::structures::BridgeStructure;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -59,6 +60,8 @@ pub struct Merchant {
     pub grain_capacity: u32,
     /// Cause id of the active `MerchantDeparted` event, for linking arrival/sale.
     pub active_trip_cause: Option<CauseId>,
+    /// Avoid spamming duplicate stranded-cancel events each day while bridge is down.
+    pub stranded_cancel_emitted: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -66,6 +69,7 @@ pub struct WorldState {
     pub day: u32,
     pub settlements: Vec<Settlement>,
     pub routes: Vec<Route>,
+    pub bridge_structure: BridgeStructure,
     pub merchant: Merchant,
     pub npcs: Vec<Npc>,
     pub properties: Vec<Property>,
@@ -172,6 +176,7 @@ pub fn initial_world() -> WorldState {
             repair_days_required: 14,
             repair_in_progress: false,
         }],
+        bridge_structure: BridgeStructure::stoneford(RouteId(0)),
         merchant: Merchant {
             id: PersonId(0),
             name: "Corvin the Carter".into(),
@@ -179,6 +184,7 @@ pub fn initial_world() -> WorldState {
             location: MerchantLocation::At(village),
             grain_capacity: 18,
             active_trip_cause: None,
+            stranded_cancel_emitted: false,
         },
     };
     crate::npc::population::populate_npcs(&mut world);

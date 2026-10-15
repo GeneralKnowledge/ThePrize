@@ -202,11 +202,24 @@ fn check_merchant_state(world: &WorldState, report: &mut ValidationReport) {
 }
 
 fn check_routes(world: &WorldState, report: &mut ValidationReport) {
+    let bridge_passable = world.bridge_structure.bridge_passable();
     for route in &world.routes {
-        if route.repair_in_progress && route.passable {
+        if route.id == world.bridge_structure.route_id && route.passable != bridge_passable {
+            report.push_error(
+                "route_structure_passable_mismatch",
+                format!(
+                    "route passable {} != structure-derived {}",
+                    route.passable, bridge_passable
+                ),
+            );
+        }
+        if route.repair_in_progress && route.passable && !bridge_passable {
             report.push_error(
                 "route_repair_passable",
-                format!("route {} passable while repair in progress", route.name),
+                format!(
+                    "route {} marked passable while repair in progress but structure is not crossable",
+                    route.name
+                ),
             );
         }
         if route.repair_progress > route.repair_days_required && !route.passable {

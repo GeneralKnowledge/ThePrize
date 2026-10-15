@@ -354,6 +354,22 @@ fn execute_travel(
         .bridge_between(SettlementId(0), SettlementId(1))
         .map(|r| r.passable)
         .unwrap_or(false);
+    let safety = world.bridge_structure.crossing_safety();
+    if matches!(
+        safety,
+        crate::structures::CrossingSafety::Restricted
+            | crate::structures::CrossingSafety::Unsafe
+            | crate::structures::CrossingSafety::Collapsed
+    ) && reason != DecisionReason::BridgeBlocked
+        && (world.npc(person_id).knows_bridge_unsafe()
+            || matches!(
+                safety,
+                crate::structures::CrossingSafety::Unsafe
+                    | crate::structures::CrossingSafety::Collapsed
+            ))
+    {
+        return;
+    }
     if !passable && reason != DecisionReason::BridgeBlocked {
         let npc = world.npc_mut(person_id);
         if !npc.beliefs.iter().any(|b| b == "bridge_unsafe") {

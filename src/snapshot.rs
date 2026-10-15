@@ -50,6 +50,8 @@ pub struct CanonicalSnapshot {
     pub routes: Vec<RouteSnapshot>,
     pub history_digest: u64,
     pub event_count: u32,
+    pub bridge_integrity: u32,
+    pub bridge_safety: String,
 }
 
 pub fn canonical_snapshot(sim: &WorldSimulator) -> CanonicalSnapshot {
@@ -127,6 +129,8 @@ pub fn canonical_snapshot_from(world: &WorldState, log: &EventLog) -> CanonicalS
         routes,
         history_digest: canonical_history_digest(log),
         event_count: log.records.len() as u32,
+        bridge_integrity: world.bridge_structure.aggregate_integrity(),
+        bridge_safety: format!("{:?}", world.bridge_structure.crossing_safety()),
     }
 }
 

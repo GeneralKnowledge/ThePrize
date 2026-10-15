@@ -1,9 +1,8 @@
 use crate::consequences::apply_world_action;
 use crate::economy::{run_production, update_prices, ConsumptionSummary};
 use crate::invariants::{check_no_aggregate_and_npc_double_consume, validate_world, ViolationSeverity};
-use crate::merchant::{on_route_blocked, tick_merchant};
+use crate::merchant::tick_merchant;
 use crate::npc::decisions::{run_npc_decisions, tick_npc_hunger};
-use crate::npc::inform_bridge_blocked;
 use crate::events::{EventLog, GoodId, InterventionKind, Season, WorldEvent};
 use crate::ids::{CauseId, RouteId, SettlementId};
 use crate::ledger::transfer_settlement_grain;
@@ -69,6 +68,7 @@ impl WorldSimulator {
         run_production(&mut self.world, &mut self.log, season);
         tick_merchant(&mut self.world, &mut self.log, day);
         update_prices(&mut self.world, &mut self.log);
+        self.tick_bridge_environmental_load();
         self.tick_bridge_repair();
 
         debug_assert!(check_no_aggregate_and_npc_double_consume(&self.log).is_ok());
@@ -97,7 +97,7 @@ impl WorldSimulator {
                 WorldEvent::ScheduledDisruption { route, day },
                 None,
             );
-            self.block_route(route, cause);
+            crate::structure_sync::apply_scheduled_collapse(self, cause);
         }
     }
 
@@ -149,37 +149,12 @@ impl WorldSimulator {
     }
 
     pub fn block_route(&mut self, route: RouteId, cause: crate::ids::CauseId) {
-        let r = self.world.route_mut(route);
-        r.passable = false;
-        r.repair_progress = 0;
-        r.repair_in_progress = false;
-        let (_, block_cause) = self.log.emit(
-            self.world.day,
-            WorldEvent::RouteBlocked {
-                route,
-                cause: CauseId(0),
-            },
-            Some(cause),
-        );
-        if let Some(rec) = self.log.records.last_mut() {
-            if let WorldEvent::RouteBlocked { cause, .. } = &mut rec.event {
-                *cause = rec.cause;
-            }
+        if route != RouteId(0) {
+            return;
         }
-        let day = self.world.day;
-        inform_bridge_blocked(&mut self.world, day);
-        on_route_blocked(&mut self.world, &mut self.log, block_cause);
-        for settlement in [SettlementId(0), SettlementId(1)] {
-            self.log.emit(
-                day,
-                WorldEvent::RumourSpread {
-                    settlement,
-                    topic: "bridge_unsafe".into(),
-                    cause: block_cause,
-                },
-                Some(block_cause),
-            );
-        }
+        let outcome = crate::structures::apply_impact(&mut self.world.bridge_structure, 900);
+        crate::structure_sync::record_structure_outcome(self, &outcome, cause, Some(cause));
+        crate::structure_sync::sync_bridge_route(self, cause, Some(cause));
     }
 
     pub fn start_bridge_repair(&mut self, route: RouteId, cause: crate::ids::CauseId) {
@@ -196,32 +171,96 @@ impl WorldSimulator {
     fn tick_bridge_repair(&mut self) {
         let route_id = RouteId(0);
         let route = self.world.route(route_id);
-        if !route.repair_in_progress || route.passable {
+        if !route.repair_in_progress {
             return;
         }
+        let village = SettlementId(0);
+        let material_cost = 14u32;
+        if self.world.settlement(village).treasury_coin < material_cost {
+            return;
+        }
+        self.world.settlement_mut(village).treasury_coin -= material_cost;
+        let parent = self
+            .log
+            .events_of_kind(|e| matches!(e, WorldEvent::BridgeRepairStarted { .. }))
+            .last()
+            .map(|r| r.cause);
+        let outcome = crate::structures::apply_repair(
+            &mut self.world.bridge_structure,
+            12,
+            8,
+            6,
+        );
+        let (_, cause) = self.log.emit(
+            self.world.day,
+            WorldEvent::StructureLoadApplied {
+                route: route_id,
+                load_units: 0,
+                cause: CauseId(0),
+            },
+            parent,
+        );
+        if let Some(rec) = self.log.records.last_mut() {
+            if let WorldEvent::StructureLoadApplied { cause, .. } = &mut rec.event {
+                *cause = rec.cause;
+            }
+        }
+        crate::structure_sync::record_structure_outcome(self, &outcome, cause, parent);
+        crate::structure_sync::sync_bridge_route(self, cause, parent);
+        let passable = self.world.bridge_structure.bridge_passable();
         let route = self.world.route_mut(route_id);
         route.repair_progress += 1;
-        if route.repair_progress >= route.repair_days_required {
-            route.passable = true;
+        if passable && route.repair_progress >= route.repair_days_required {
             route.repair_in_progress = false;
             route.repair_progress = 0;
-            let parent = self
-                .log
-                .events_of_kind(|e| matches!(e, WorldEvent::BridgeRepairStarted { .. }))
-                .last()
-                .map(|r| r.cause);
-            self.log.emit(
-                self.world.day,
-                WorldEvent::RouteRepaired {
-                    route: route_id,
-                    cause: CauseId(0),
-                },
-                parent,
-            );
-            if let Some(rec) = self.log.records.last_mut() {
-                if let WorldEvent::RouteRepaired { cause, .. } = &mut rec.event {
-                    *cause = rec.cause;
+        }
+    }
+
+    fn tick_bridge_environmental_load(&mut self) {
+        let route_id = RouteId(0);
+        let day = self.world.day;
+        if self.world.route(route_id).passable {
+            let load_units = 12u32;
+            let outcome =
+                crate::structures::apply_sustained_load(&mut self.world.bridge_structure, load_units);
+            if outcome.applied {
+                let (_, cause) = self.log.emit(
+                    day,
+                    WorldEvent::StructureLoadApplied {
+                        route: route_id,
+                        load_units,
+                        cause: CauseId(0),
+                    },
+                    None,
+                );
+                if let Some(rec) = self.log.records.last_mut() {
+                    if let WorldEvent::StructureLoadApplied { cause, .. } = &mut rec.event {
+                        *cause = rec.cause;
+                    }
                 }
+                crate::structure_sync::record_structure_outcome(self, &outcome, cause, None);
+                crate::structure_sync::sync_bridge_route(self, cause, None);
+            }
+        }
+        if day % 7 == 0 {
+            let outcome = crate::structures::apply_weather(&mut self.world.bridge_structure);
+            if outcome.applied {
+                let (_, cause) = self.log.emit(
+                    day,
+                    WorldEvent::StructureLoadApplied {
+                        route: route_id,
+                        load_units: 0,
+                        cause: CauseId(0),
+                    },
+                    None,
+                );
+                if let Some(rec) = self.log.records.last_mut() {
+                    if let WorldEvent::StructureLoadApplied { cause, .. } = &mut rec.event {
+                        *cause = rec.cause;
+                    }
+                }
+                crate::structure_sync::record_structure_outcome(self, &outcome, cause, None);
+                crate::structure_sync::sync_bridge_route(self, cause, None);
             }
         }
     }
