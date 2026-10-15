@@ -1,4 +1,4 @@
-use crate::ids::{PersonId, RouteId, SettlementId};
+use crate::ids::{CauseId, PersonId, RouteId, SettlementId};
 use crate::npc::Npc;
 use crate::property::Property;
 use serde::{Deserialize, Serialize};
@@ -57,6 +57,8 @@ pub struct Merchant {
     pub coin: u32,
     pub location: MerchantLocation,
     pub grain_capacity: u32,
+    /// Cause id of the active `MerchantDeparted` event, for linking arrival/sale.
+    pub active_trip_cause: Option<CauseId>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -176,6 +178,7 @@ pub fn initial_world() -> WorldState {
             coin: 120,
             location: MerchantLocation::At(village),
             grain_capacity: 18,
+            active_trip_cause: None,
         },
     };
     crate::npc::population::populate_npcs(&mut world);

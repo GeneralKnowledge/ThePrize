@@ -1,7 +1,9 @@
 use crate::economy::snapshot_settlement;
 use crate::events::{InterventionKind, WorldEvent};
 use crate::history::{ancestors_of, canonical_history_digest, descendants_of, find_cause_for_event};
-use crate::ledger::GrainLedger;
+use crate::invariants::{validate_world, ViolationSeverity};
+use crate::ledger::{reconcile_grain_conservation, GrainLedger, MoneyLedger};
+use crate::snapshot::{canonical_snapshot, snapshot_digest};
 use crate::persistence::{persist_run, RunPersistence};
 use crate::simulation::{ScheduledIntervention, SimulationConfig, WorldSimulator};
 use crate::world::initial_world;
@@ -38,6 +40,17 @@ pub struct ScenarioMetrics {
     pub merchant_sales: u32,
     pub merchant_trip_cancellations: u32,
     pub history_digest: u64,
+    pub grain_market_purchased: u64,
+    pub grain_food_consumed: u64,
+    pub grain_conservation_imbalance: i64,
+    pub integrity_errors: u32,
+    pub integrity_warnings: u32,
+    pub npc_deaths: u32,
+    pub population_start: u32,
+    pub population_end: u32,
+    pub snapshot_digest: u64,
+    pub wages_paid: u64,
+    pub npc_market_coin_spent: u64,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -51,7 +64,9 @@ pub struct ScenarioReport {
 
 pub fn run_scenario(kind: ScenarioKind, seed: u64, output_dir: Option<&Path>) -> ScenarioReport {
     let config = config_for(kind, seed);
-    let mut sim = WorldSimulator::new(initial_world(), config);
+    let opening = initial_world();
+    let population_start: u32 = opening.settlements.iter().map(|s| s.population).sum();
+    let mut sim = WorldSimulator::new(opening.clone(), config);
 
     let mut min_village_grain = u32::MAX;
     let mut min_town_grain = u32::MAX;
@@ -64,8 +79,14 @@ pub fn run_scenario(kind: ScenarioKind, seed: u64, output_dir: Option<&Path>) ->
         min_town_grain = min_town_grain.min(t);
     }
 
-    let metrics = compute_metrics(&sim, min_village_grain, min_town_grain);
-    let causal_summary = summarize_causal_chain(&sim);
+    let metrics = compute_metrics(
+        &sim,
+        &opening,
+        min_village_grain,
+        min_town_grain,
+        population_start,
+    );
+    let causal_summary = summarize_causal_chain(&sim, &opening);
 
     let sqlite_path = output_dir.map(|dir| {
         let path = dir.join(format!("{:?}_{}.sqlite", kind, seed));
@@ -133,7 +154,13 @@ fn weekly_hauls(start: u32, end: u32) -> Vec<ScheduledIntervention> {
     v
 }
 
-fn compute_metrics(sim: &WorldSimulator, min_village: u32, min_town: u32) -> ScenarioMetrics {
+fn compute_metrics(
+    sim: &WorldSimulator,
+    opening: &crate::world::WorldState,
+    min_village: u32,
+    min_town: u32,
+    population_start: u32,
+) -> ScenarioMetrics {
     let merchant_transfers = sim
         .log
         .events_of_kind(|e| matches!(e, WorldEvent::GoodsTransferred { .. }))
@@ -182,17 +209,28 @@ fn compute_metrics(sim: &WorldSimulator, min_village: u32, min_town: u32) -> Sce
         _ => 0,
     };
 
-    let mut produced = 0u64;
-    let mut consumed = 0u64;
-    for record in &sim.log.records {
-        match &record.event {
-            WorldEvent::GoodsProduced { quantity, .. } => produced += *quantity as u64,
-            WorldEvent::GoodsConsumed { quantity, .. } => consumed += *quantity as u64,
-            WorldEvent::NpcAte { grain, .. } => consumed += *grain as u64,
-            WorldEvent::NpcBoughtFood { grain, .. } => consumed += *grain as u64,
-            _ => {}
-        }
-    }
+    let ledger = GrainLedger::from_event_log(&sim.log);
+    let money = MoneyLedger::from_event_log(&sim.log);
+    let conservation = reconcile_grain_conservation(opening, &sim.world, &ledger);
+    let validation = validate_world(&sim.world, &sim.log);
+    let integrity_errors = validation
+        .violations
+        .iter()
+        .filter(|v| v.severity == ViolationSeverity::Error)
+        .count() as u32;
+    let integrity_warnings = validation
+        .violations
+        .iter()
+        .filter(|v| v.severity == ViolationSeverity::Warning)
+        .count() as u32;
+    let npc_deaths = sim
+        .log
+        .events_of_kind(|e| matches!(e, WorldEvent::PersonDied { .. }))
+        .count() as u32;
+    let population_end: u32 = sim.world.settlements.iter().map(|s| s.population).sum();
+    let snap = canonical_snapshot(sim);
+    let produced = ledger.produced;
+    let consumed = ledger.food_actually_consumed();
 
     let merchant_departures = sim
         .log
@@ -229,19 +267,31 @@ fn compute_metrics(sim: &WorldSimulator, min_village: u32, min_town: u32) -> Sce
         merchant_sales,
         merchant_trip_cancellations,
         history_digest: canonical_history_digest(&sim.log),
+        grain_market_purchased: ledger.market_purchased,
+        grain_food_consumed: ledger.food_actually_consumed(),
+        grain_conservation_imbalance: conservation.imbalance,
+        integrity_errors,
+        integrity_warnings,
+        npc_deaths,
+        population_start,
+        population_end,
+        snapshot_digest: snapshot_digest(&snap),
+        wages_paid: money.wages_from_treasury,
+        npc_market_coin_spent: money.npc_market_spent,
     }
 }
 
-fn summarize_causal_chain(sim: &WorldSimulator) -> Vec<String> {
+fn summarize_causal_chain(sim: &WorldSimulator, opening: &crate::world::WorldState) -> Vec<String> {
     let mut lines = vec![];
     let ledger = GrainLedger::from_event_log(&sim.log);
     lines.push(format!(
-        "Grain ledger: produced {} | npc food {} | merchant delivered {} | alt hauls {} | thefts {}",
+        "Grain ledger: produced {} | eaten {} | market purchases {} | merchant export {} | alt hauls {} | conservation imbalance {}",
         ledger.produced,
-        ledger.total_npc_food(),
-        ledger.merchant_delivered,
+        ledger.food_actually_consumed(),
+        ledger.market_purchased,
+        ledger.merchant_exported,
         ledger.alt_hauls,
-        ledger.thefts
+        reconcile_grain_conservation(opening, &sim.world, &ledger).imbalance
     ));
 
     if let Some(block_cause) =

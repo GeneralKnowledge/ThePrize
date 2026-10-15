@@ -1,6 +1,6 @@
 use crate::consequences::apply_world_action;
 use crate::economy::{run_production, update_prices, ConsumptionSummary};
-use crate::invariants::{check_no_aggregate_and_npc_double_consume, check_world_invariants};
+use crate::invariants::{check_no_aggregate_and_npc_double_consume, validate_world, ViolationSeverity};
 use crate::merchant::{on_route_blocked, tick_merchant};
 use crate::npc::decisions::{run_npc_decisions, tick_npc_hunger};
 use crate::npc::inform_bridge_blocked;
@@ -71,8 +71,18 @@ impl WorldSimulator {
         update_prices(&mut self.world, &mut self.log);
         self.tick_bridge_repair();
 
-        debug_assert!(check_world_invariants(&self.world).is_ok());
         debug_assert!(check_no_aggregate_and_npc_double_consume(&self.log).is_ok());
+        if cfg!(debug_assertions) {
+            let report = validate_world(&self.world, &self.log);
+            debug_assert!(
+                !report
+                    .violations
+                    .iter()
+                    .any(|v| v.severity == ViolationSeverity::Error),
+                "integrity errors: {:?}",
+                report.violations
+            );
+        }
 
         SimTickResult {
             consumption: ConsumptionSummary::default(),

@@ -11,14 +11,25 @@ pub mod persistence;
 pub mod property;
 pub mod scenarios;
 pub mod simulation;
+pub mod snapshot;
 pub mod world;
 pub mod world_action;
 
 pub use consequences::{apply_world_action, ActionOutcome, Actor, WorldAction};
 pub use history::{
     ancestors_of, canonical_history_digest, descendants_of, find_cause_for_event,
-    summarize_bridge_collapse, trace_from_cause, CausalLink,
+    summarize_bridge_collapse, trace_from_cause, validate_cause_graph, CausalLink,
 };
-pub use invariants::{check_no_aggregate_and_npc_double_consume, check_world_invariants};
-pub use ledger::{transfer_settlement_grain, GrainLedger};
+pub use invariants::{
+    check_no_aggregate_and_npc_double_consume, check_world_invariants, validate_world,
+    IntegrityViolation, ValidationReport, ViolationSeverity,
+};
+pub use ledger::{
+    reconcile_grain_conservation, transfer_settlement_grain, GrainConservationReport, GrainLedger,
+    MoneyLedger,
+};
+pub use snapshot::{
+    assert_snapshots_equal, canonical_snapshot, canonical_snapshot_from, snapshot_digest,
+    CanonicalSnapshot,
+};
 pub use scenarios::{run_all_scenarios, ScenarioKind, ScenarioReport};

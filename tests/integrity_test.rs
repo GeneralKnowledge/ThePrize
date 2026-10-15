@@ -93,7 +93,7 @@ fn route_block_has_causal_descendants() {
     );
     let _ = ancestors_of(&sim_inner.log, block.cause);
     let ledger = GrainLedger::from_event_log(&sim_inner.log);
-    assert!(ledger.produced > ledger.total_npc_food() / 2);
+    assert!(ledger.produced > ledger.food_actually_consumed() / 2);
 }
 
 #[test]
