@@ -31,8 +31,10 @@ cargo run --release -- --seed 7 --scenario disruption
 - **Consumption:** NPC personal eating and market purchases only — no parallel aggregate settlement consumption in the daily loop
 - **Wages:** Paid from each settlement’s `treasury_coin`, replenished daily by `population × 2` (abstract tax/tithing — not coin minted on workers)
 - **Merchant:** Grain leaves the source on `MerchantDeparted`; destination inventory updates on `MerchantArrived` with a single `MerchantSaleCompleted` payment
-- **Causality:** `history::ancestors_of`, `descendants_of`, `trace_from_cause`, `canonical_history_digest`
-- **Invariants:** `invariants::check_world_invariants` (debug builds assert each day)
+- **Causality:** `history::ancestors_of`, `descendants_of`, `trace_from_cause`, `validate_cause_graph`, `canonical_history_digest`
+- **Integrity:** `invariants::validate_world` → `ValidationReport` (errors vs warnings; no mutation)
+- **Accounting:** `ledger::GrainLedger`, `MoneyLedger`, `reconcile_grain_conservation` (purchases ≠ consumption)
+- **Determinism:** `snapshot::canonical_snapshot` / `snapshot_digest` for regression compares
 
 ## Tests
 
@@ -40,7 +42,9 @@ cargo run --release -- --seed 7 --scenario disruption
 cargo test
 ```
 
-Covers scenario acceptance, NPC behaviour, consequence actions, merchant integrity, treasury wages, and deterministic history digests.
+Covers scenario acceptance, NPC behaviour, consequences, merchant journeys, grain conservation, long-run multi-seed runs (400 days), and snapshot/history determinism.
+
+M4 notes: `docs/m4-audit-plan.md`, `docs/m4-invariant-catalogue.md`, `docs/m4-merchant-lifecycle.md`, `docs/m4-summary.md`.
 
 ## M3 consequences
 
