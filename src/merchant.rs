@@ -49,6 +49,9 @@ pub fn on_route_blocked(world: &mut WorldState, log: &mut EventLog, cause: Cause
 
 pub fn tick_merchant(world: &mut WorldState, log: &mut EventLog, day: u32) {
     let merchant_id = world.merchant.id;
+    if world.bridge_between(VILLAGE, TOWN).expect("bridge").passable {
+        world.merchant.stranded_cancel_emitted = false;
+    }
 
     if let MerchantLocation::Travelling {
         from,
@@ -188,33 +191,22 @@ pub fn tick_merchant(world: &mut WorldState, log: &mut EventLog, day: u32) {
                 None,
             );
             world.merchant.active_trip_cause = Some(trip_cause);
-        } else if !passable && town_needs_imports {
+        } else if !passable && town_needs_imports && !world.merchant.stranded_cancel_emitted {
             let block_cause = log
                 .records
                 .iter()
                 .rev()
                 .find(|r| matches!(r.event, WorldEvent::RouteBlocked { .. }))
                 .map(|r| r.cause);
-            let already_today = log.records.iter().any(|r| {
-                r.day == day
-                    && matches!(
-                        r.event,
-                        WorldEvent::MerchantTripCancelled {
-                            reason: ref s,
-                            ..
-                        } if s.contains("stranded")
-                    )
-            });
-            if !already_today {
-                log.emit(
-                    day,
-                    WorldEvent::MerchantTripCancelled {
-                        reason: "stranded at destination; bridge closed".into(),
-                        cause: block_cause,
-                    },
-                    block_cause,
-                );
-            }
+            log.emit(
+                day,
+                WorldEvent::MerchantTripCancelled {
+                    reason: "stranded at destination; bridge closed".into(),
+                    cause: block_cause,
+                },
+                block_cause,
+            );
+            world.merchant.stranded_cancel_emitted = true;
         }
     }
 }

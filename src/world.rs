@@ -59,6 +59,8 @@ pub struct Merchant {
     pub grain_capacity: u32,
     /// Cause id of the active `MerchantDeparted` event, for linking arrival/sale.
     pub active_trip_cause: Option<CauseId>,
+    /// Avoid spamming duplicate stranded-cancel events each day while bridge is down.
+    pub stranded_cancel_emitted: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -179,6 +181,7 @@ pub fn initial_world() -> WorldState {
             location: MerchantLocation::At(village),
             grain_capacity: 18,
             active_trip_cause: None,
+            stranded_cancel_emitted: false,
         },
     };
     crate::npc::population::populate_npcs(&mut world);
