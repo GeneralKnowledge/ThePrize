@@ -40,6 +40,16 @@ pub fn persist_run(path: &Path, run: &RunPersistence<'_>) -> rusqlite::Result<()
             cause INTEGER NOT NULL,
             payload TEXT NOT NULL
         );
+        CREATE TABLE npcs (
+            id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            home INTEGER NOT NULL,
+            job TEXT NOT NULL,
+            coin INTEGER NOT NULL,
+            grain INTEGER NOT NULL,
+            hunger REAL NOT NULL,
+            debt_remaining INTEGER NOT NULL
+        );
         ",
     )?;
 

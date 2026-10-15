@@ -1,4 +1,5 @@
 pub mod economy;
+pub mod npc;
 pub mod events;
 pub mod ids;
 pub mod persistence;

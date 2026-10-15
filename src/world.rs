@@ -1,4 +1,5 @@
 use crate::ids::{PersonId, RouteId, SettlementId};
+use crate::npc::Npc;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -59,6 +60,7 @@ pub struct WorldState {
     pub settlements: Vec<Settlement>,
     pub routes: Vec<Route>,
     pub merchant: Merchant,
+    pub npcs: Vec<Npc>,
     /// Grain per person per day.
     pub grain_per_person_per_day: f64,
 }
@@ -99,21 +101,33 @@ impl WorldState {
         let pop = self.settlement(settlement).population;
         (pop as f64 * self.grain_per_person_per_day).ceil() as u32
     }
+
+    pub fn npc(&self, id: PersonId) -> &Npc {
+        self.npcs.iter().find(|n| n.id == id).expect("npc id")
+    }
+
+    pub fn npc_mut(&mut self, id: PersonId) -> &mut Npc {
+        self.npcs
+            .iter_mut()
+            .find(|n| n.id == id)
+            .expect("npc id")
+    }
 }
 
 pub fn initial_world() -> WorldState {
     let village = SettlementId(0);
     let town = SettlementId(1);
-    WorldState {
+    let mut world = WorldState {
         day: 0,
         grain_per_person_per_day: 0.65,
+        npcs: vec![],
         settlements: vec![
             Settlement {
                 id: village,
                 name: "Hollowbrook".into(),
                 population: 24,
                 grain_inventory: 220,
-                farm_daily_capacity: 34,
+                farm_daily_capacity: 32,
                 market: MarketState {
                     grain_price: 1.0,
                     desired_grain_stock: 100,
@@ -124,7 +138,7 @@ pub fn initial_world() -> WorldState {
                 name: "Millford".into(),
                 population: 16,
                 grain_inventory: 70,
-                farm_daily_capacity: 10,
+                farm_daily_capacity: 1,
                 market: MarketState {
                     grain_price: 1.35,
                     desired_grain_stock: 55,
@@ -149,5 +163,7 @@ pub fn initial_world() -> WorldState {
             location: MerchantLocation::At(village),
             grain_capacity: 18,
         },
-    }
+    };
+    crate::npc::population::populate_npcs(&mut world);
+    world
 }

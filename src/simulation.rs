@@ -1,4 +1,6 @@
-use crate::economy::{run_consumption, run_production, update_prices, ConsumptionSummary};
+use crate::economy::{run_production, update_prices, ConsumptionSummary};
+use crate::npc::decisions::{run_npc_decisions, tick_npc_hunger};
+use crate::npc::inform_bridge_blocked;
 use crate::events::{EventLog, GoodId, InterventionKind, Season, WorldEvent};
 use crate::ids::{RouteId, SettlementId};
 use crate::world::{MerchantLocation, WorldState};
@@ -53,10 +55,12 @@ impl WorldSimulator {
         self.apply_scheduled_disruptions(day);
         self.apply_scheduled_interventions(day);
 
+        tick_npc_hunger(&mut self.world, &mut self.log);
+        run_npc_decisions(&mut self.world, &mut self.log);
         run_production(&mut self.world, &mut self.log, season);
         self.tick_merchant(day);
-        let consumption = run_consumption(&mut self.world, &mut self.log);
         update_prices(&mut self.world, &mut self.log);
+        let consumption = ConsumptionSummary::default();
         self.tick_bridge_repair();
 
         SimTickResult { consumption }
@@ -111,6 +115,8 @@ impl WorldSimulator {
             WorldEvent::RouteBlocked { route, cause },
             Some(cause),
         );
+        let day = self.world.day;
+        inform_bridge_blocked(&mut self.world, day);
     }
 
     pub fn start_bridge_repair(&mut self, route: RouteId, cause: crate::ids::CauseId) {
