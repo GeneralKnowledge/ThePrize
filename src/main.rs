@@ -91,8 +91,15 @@ fn print_report(report: &living_world::scenarios::ScenarioReport) {
         m.final_village_grain, m.min_village_grain, m.final_town_grain, m.min_town_grain
     );
     println!(
-        "  merchant transfers: {}, alt hauls: {}, starved event days: {}",
-        m.merchant_transfers, m.alternative_hauls, m.starved_events
+        "  merchant: {} departures, {} sales, {} transfers, {} cancellations",
+        m.merchant_departures,
+        m.merchant_sales,
+        m.merchant_transfers,
+        m.merchant_trip_cancellations
+    );
+    println!(
+        "  alt hauls: {}, starved event days: {}, history digest: {:x}",
+        m.alternative_hauls, m.starved_events, m.history_digest
     );
     println!(
         "  bridge blocked span: {} days, repaired: {}",

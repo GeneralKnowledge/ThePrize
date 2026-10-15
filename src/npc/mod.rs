@@ -104,6 +104,6 @@ pub fn sync_settlement_population(world: &mut crate::world::WorldState) {
             .iter()
             .filter(|n| n.alive && n.home == settlement.id)
             .count() as u32;
-        settlement.population = count.max(1);
+        settlement.population = count;
     }
 }

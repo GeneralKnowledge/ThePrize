@@ -15,6 +15,8 @@ pub struct Settlement {
     pub base_farm_daily_capacity: u32,
     /// Desired grain buffer for pricing (days of consumption at current pop).
     pub market: MarketState,
+    /// Abstract employer/tax float used to pay local wages (not yet a full treasury sim).
+    pub treasury_coin: u32,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -41,7 +43,8 @@ pub struct Route {
 pub enum MerchantLocation {
     At(SettlementId),
     Travelling {
-        destination: SettlementId,
+        from: SettlementId,
+        to: SettlementId,
         days_remaining: u32,
         carrying_grain: u32,
     },
@@ -140,6 +143,7 @@ pub fn initial_world() -> WorldState {
                     grain_price: 1.0,
                     desired_grain_stock: 100,
                 },
+                treasury_coin: 240,
             },
             Settlement {
                 id: town,
@@ -152,6 +156,7 @@ pub fn initial_world() -> WorldState {
                     grain_price: 1.35,
                     desired_grain_stock: 55,
                 },
+                treasury_coin: 180,
             },
         ],
         routes: vec![Route {

@@ -21,6 +21,7 @@ pub enum DecisionReason {
     SeekBetterWages,
     BridgeKnownUnsafe,
     BridgeBlocked,
+    MarketUnreliable,
     Travelling,
     Rested,
     DesperateTheft,

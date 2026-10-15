@@ -79,9 +79,12 @@ fn evaluate(npc: &Npc, world: &WorldState) -> Choice {
 
     if npc.hunger >= 0.45 {
         if let Some(loc) = npc.location() {
-            let price = world.settlement(loc).market.grain_price;
-            let stock = world.settlement(loc).grain_inventory;
+            let settlement = world.settlement(loc);
+            let price = settlement.market.grain_price;
+            let stock = settlement.grain_inventory;
+            let desired = settlement.market.desired_grain_stock;
             let affordable = (npc.coin as f64 / price).floor() as u32;
+            let market_thin = stock + 8 < desired || price > 1.6;
             if affordable > 0 && stock > 5 {
                 choices.push(Choice {
                     action: NpcAction::BuyFood,
@@ -89,6 +92,28 @@ fn evaluate(npc: &Npc, world: &WorldState) -> Choice {
                     score: (npc.hunger * 180.0) as i32 + 40,
                     detail: "buy grain at local market",
                 });
+            }
+            if market_thin
+                && npc.grain == 0
+                && npc.hunger > 0.5
+                && npc.location() == Some(npc.home)
+            {
+                let other = if loc == SettlementId(0) {
+                    SettlementId(1)
+                } else {
+                    SettlementId(0)
+                };
+                let bridge = world.bridge_between(SettlementId(0), SettlementId(1));
+                let passable = bridge.map(|r| r.passable).unwrap_or(false);
+                let other_stock = world.settlement(other).grain_inventory;
+                if passable && !npc.knows_bridge_unsafe() && other_stock > stock + 15 {
+                    choices.push(Choice {
+                        action: NpcAction::Travel,
+                        reason: DecisionReason::MarketUnreliable,
+                        score: (npc.hunger * 200.0) as i32 + 55,
+                        detail: "travel where market stocks look healthier",
+                    });
+                }
             }
         }
     }
@@ -236,7 +261,7 @@ fn apply_decision(
                 world.pending_actions.push(WorldAction::StealSettlementGrain {
                     thief: Actor::Npc(person_id),
                     settlement: loc,
-                    quantity: 8,
+                    quantity: 3,
                 });
             }
         }
@@ -255,13 +280,18 @@ fn execute_work(
     if job == Job::Miller && !mill_operational(world) {
         return;
     }
-    let npc = world.npc_mut(person_id);
-    let loc = match npc.location() {
+    let loc = match world.npc(person_id).location() {
         Some(s) => s,
         None => return,
     };
+    let wage = job.daily_wage();
+    if world.settlement(loc).treasury_coin < wage {
+        return;
+    }
+    world.settlement_mut(loc).treasury_coin -= wage;
+
+    let npc = world.npc_mut(person_id);
     npc.worked_today = true;
-    let wage = npc.job.daily_wage();
     npc.coin += wage;
 
     if npc.goals.debt_remaining > 0 {
@@ -270,6 +300,15 @@ fn execute_work(
         npc.goals.debt_remaining -= payment;
     }
 
+    log.emit(
+        day,
+        WorldEvent::WagePaidFromTreasury {
+            settlement: loc,
+            person: person_id,
+            amount: wage,
+        },
+        None,
+    );
     log.emit(
         day,
         WorldEvent::NpcWorked {
