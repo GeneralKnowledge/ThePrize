@@ -1,6 +1,7 @@
 use crate::ids::{CauseId, PersonId, RouteId, SettlementId};
 use crate::npc::Npc;
 use crate::property::Property;
+use crate::structures::BridgeStructure;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -68,6 +69,7 @@ pub struct WorldState {
     pub day: u32,
     pub settlements: Vec<Settlement>,
     pub routes: Vec<Route>,
+    pub bridge_structure: BridgeStructure,
     pub merchant: Merchant,
     pub npcs: Vec<Npc>,
     pub properties: Vec<Property>,
@@ -174,6 +176,7 @@ pub fn initial_world() -> WorldState {
             repair_days_required: 14,
             repair_in_progress: false,
         }],
+        bridge_structure: BridgeStructure::stoneford(RouteId(0)),
         merchant: Merchant {
             id: PersonId(0),
             name: "Corvin the Carter".into(),

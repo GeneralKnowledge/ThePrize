@@ -49,22 +49,41 @@ fn damage_bridge(
     actor: Actor,
     cause: CauseId,
 ) -> ActionOutcome {
+    if route != RouteId(0) {
+        return ActionOutcome {
+            succeeded: false,
+            cause,
+            summary: "Unknown route structure".into(),
+        };
+    }
+    let force = match actor {
+        Actor::Player => 880,
+        Actor::Npc(_) => 280,
+    };
+    let outcome = crate::structures::apply_impact(&mut sim.world.bridge_structure, force);
+    let severity = (1000u32.saturating_sub(sim.world.bridge_structure.aggregate_integrity()) / 10)
+        .min(100);
     sim.log.emit(
         sim.world.day,
         WorldEvent::StructureDamaged {
             route: Some(route),
             property: None,
             actor,
-            severity: 100,
+            severity,
             cause,
         },
         Some(cause),
     );
-    sim.block_route(route, cause);
+    crate::structure_sync::record_structure_outcome(sim, &outcome, cause, Some(cause));
+    crate::structure_sync::sync_bridge_route(sim, cause, Some(cause));
+    let summary = format!(
+        "Impact on bridge: {:?} -> {:?}",
+        outcome.safety_before, outcome.safety_after
+    );
     ActionOutcome {
-        succeeded: true,
+        succeeded: outcome.applied,
         cause,
-        summary: "Bridge damaged; route is blocked".into(),
+        summary,
     }
 }
 
