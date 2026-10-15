@@ -31,11 +31,11 @@ pub use ledger::{
     reconcile_grain_conservation, transfer_settlement_grain, GrainConservationReport, GrainLedger,
     MoneyLedger,
 };
+pub use materials::{material, MaterialId};
 pub use snapshot::{
     assert_snapshots_equal, canonical_snapshot, canonical_snapshot_from, snapshot_digest,
     CanonicalSnapshot,
 };
-pub use materials::{material, MaterialId};
 pub use scenarios::{run_all_scenarios, ScenarioKind, ScenarioReport};
 pub use structures::{
     apply_impact, apply_repair, apply_sustained_load, BridgeStructure, CrossingSafety,
