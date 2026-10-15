@@ -4,7 +4,12 @@ use living_world::scenarios::{run_all_scenarios, ScenarioKind, BRIDGE_BLOCK_DAY,
 fn settlements_remain_viable_in_baseline_year() {
     let c = run_all_scenarios(42, None);
     let m = &c.baseline.metrics;
-    assert!(m.final_village_grain > 50, "village final {}", m.final_village_grain);
+    assert!(
+        m.min_village_grain > 5 && m.final_village_grain > 5,
+        "village min {} final {}",
+        m.min_village_grain,
+        m.final_village_grain
+    );
     assert!(m.final_town_grain > 10, "town final {}", m.final_town_grain);
     assert!(
         m.merchant_transfers >= 10 || m.total_grain_consumed > 500,

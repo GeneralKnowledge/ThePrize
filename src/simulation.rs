@@ -1,11 +1,14 @@
 use crate::consequences::apply_world_action;
 use crate::economy::{run_production, update_prices, ConsumptionSummary};
+use crate::invariants::{check_no_aggregate_and_npc_double_consume, check_world_invariants};
+use crate::merchant::{on_route_blocked, tick_merchant};
 use crate::npc::decisions::{run_npc_decisions, tick_npc_hunger};
 use crate::npc::inform_bridge_blocked;
 use crate::events::{EventLog, GoodId, InterventionKind, Season, WorldEvent};
-use crate::ids::{RouteId, SettlementId};
+use crate::ids::{CauseId, RouteId, SettlementId};
+use crate::ledger::transfer_settlement_grain;
 use crate::world_action::ScheduledAction;
-use crate::world::{MerchantLocation, WorldState};
+use crate::world::WorldState;
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 
@@ -59,16 +62,21 @@ impl WorldSimulator {
         self.apply_scheduled_interventions(day);
         self.apply_scheduled_actions(day);
 
+        credit_settlement_treasuries(&mut self.world);
         tick_npc_hunger(&mut self.world, &mut self.log);
         run_npc_decisions(&mut self.world, &mut self.log);
         self.flush_pending_actions();
         run_production(&mut self.world, &mut self.log, season);
-        self.tick_merchant(day);
+        tick_merchant(&mut self.world, &mut self.log, day);
         update_prices(&mut self.world, &mut self.log);
-        let consumption = ConsumptionSummary::default();
         self.tick_bridge_repair();
 
-        SimTickResult { consumption }
+        debug_assert!(check_world_invariants(&self.world).is_ok());
+        debug_assert!(check_no_aggregate_and_npc_double_consume(&self.log).is_ok());
+
+        SimTickResult {
+            consumption: ConsumptionSummary::default(),
+        }
     }
 
     fn apply_scheduled_disruptions(&mut self, day: u32) {
@@ -135,13 +143,33 @@ impl WorldSimulator {
         r.passable = false;
         r.repair_progress = 0;
         r.repair_in_progress = false;
-        self.log.emit(
+        let (_, block_cause) = self.log.emit(
             self.world.day,
-            WorldEvent::RouteBlocked { route, cause },
+            WorldEvent::RouteBlocked {
+                route,
+                cause: CauseId(0),
+            },
             Some(cause),
         );
+        if let Some(rec) = self.log.records.last_mut() {
+            if let WorldEvent::RouteBlocked { cause, .. } = &mut rec.event {
+                *cause = rec.cause;
+            }
+        }
         let day = self.world.day;
         inform_bridge_blocked(&mut self.world, day);
+        on_route_blocked(&mut self.world, &mut self.log, block_cause);
+        for settlement in [SettlementId(0), SettlementId(1)] {
+            self.log.emit(
+                day,
+                WorldEvent::RumourSpread {
+                    settlement,
+                    topic: "bridge_unsafe".into(),
+                    cause: block_cause,
+                },
+                Some(block_cause),
+            );
+        }
     }
 
     pub fn start_bridge_repair(&mut self, route: RouteId, cause: crate::ids::CauseId) {
@@ -167,29 +195,34 @@ impl WorldSimulator {
             route.passable = true;
             route.repair_in_progress = false;
             route.repair_progress = 0;
-            let cause = self.log.mint_cause();
+            let parent = self
+                .log
+                .events_of_kind(|e| matches!(e, WorldEvent::BridgeRepairStarted { .. }))
+                .last()
+                .map(|r| r.cause);
             self.log.emit(
                 self.world.day,
                 WorldEvent::RouteRepaired {
                     route: route_id,
-                    cause,
+                    cause: CauseId(0),
                 },
-                None,
+                parent,
             );
+            if let Some(rec) = self.log.records.last_mut() {
+                if let WorldEvent::RouteRepaired { cause, .. } = &mut rec.event {
+                    *cause = rec.cause;
+                }
+            }
         }
     }
 
     fn player_haul_grain_alternative(&mut self, cause: crate::ids::CauseId) {
         let village = SettlementId(0);
         let town = SettlementId(1);
-        let haul_amount = 30u32;
-        let available = self.world.settlement(village).grain_inventory;
-        let qty = haul_amount.min(available);
+        let qty = transfer_settlement_grain(&mut self.world, village, town, 30);
         if qty == 0 {
             return;
         }
-        self.world.settlement_mut(village).grain_inventory -= qty;
-        self.world.settlement_mut(town).grain_inventory += qty;
         self.log.emit(
             self.world.day,
             WorldEvent::AlternativeRouteUsed {
@@ -203,114 +236,17 @@ impl WorldSimulator {
         );
     }
 
-    /// Primary trade lane: export grain from Hollowbrook to Millford when the town is short.
-    fn tick_merchant(&mut self, day: u32) {
-        let merchant_id = self.world.merchant.id;
-        let village = SettlementId(0);
-        let town = SettlementId(1);
-
-        if let MerchantLocation::Travelling {
-            destination,
-            days_remaining,
-            carrying_grain,
-        } = self.world.merchant.location
-        {
-            if days_remaining > 1 {
-                self.world.merchant.location = MerchantLocation::Travelling {
-                    destination,
-                    days_remaining: days_remaining - 1,
-                    carrying_grain,
-                };
-                return;
-            }
-            if days_remaining == 1 {
-                if carrying_grain > 0 && destination == town {
-                    self.world.settlement_mut(town).grain_inventory += carrying_grain;
-                    let dest_price = self.world.settlement(town).market.grain_price;
-                    let sale = (carrying_grain as f64 * dest_price * 0.95).floor() as u32;
-                    self.world.merchant.coin += sale;
-                    self.log.emit(
-                        day,
-                        WorldEvent::GoodsTransferred {
-                            from: village,
-                            to: town,
-                            good: GoodId::Grain,
-                            quantity: carrying_grain,
-                            via_merchant: merchant_id,
-                        },
-                        None,
-                    );
-                }
-                self.world.merchant.location = MerchantLocation::At(destination);
-                return;
-            }
-        }
-
-        let passable = self.world.bridge_between(village, town).expect("bridge").passable;
-
-        let current = match self.world.merchant.location {
-            MerchantLocation::At(s) => s,
-            MerchantLocation::Travelling { .. } => return,
-        };
-
-        let town_stock = self.world.settlement(town).grain_inventory;
-        let town_desired = self.world.settlement(town).market.desired_grain_stock;
-        let village_stock = self.world.settlement(village).grain_inventory;
-        let village_reserve = self.world.settlement(village).market.desired_grain_stock;
-
-        let town_needs_imports = town_stock + 8 < town_desired;
-        let village_can_export = village_stock > village_reserve + 20;
-
-        if current == village {
-            if !town_needs_imports || !village_can_export {
-                return;
-            }
-            if !passable {
-                return;
-            }
-            let town_deficit = town_desired.saturating_sub(town_stock);
-            if town_deficit < 6 {
-                return;
-            }
-            let max_export = village_stock.saturating_sub(village_reserve + 40);
-            let load = self
-                .world
-                .merchant
-                .grain_capacity
-                .min(max_export)
-                .min(town_deficit + 4);
-            if load == 0 {
-                return;
-            }
-            self.world.settlement_mut(village).grain_inventory -= load;
-            self.world.settlement_mut(town).grain_inventory += load;
-            let dest_price = self.world.settlement(town).market.grain_price;
-            let sale = (load as f64 * dest_price * 0.92).floor() as u32;
-            self.world.merchant.coin += sale.saturating_sub(2);
-            self.log.emit(
-                day,
-                WorldEvent::GoodsTransferred {
-                    from: village,
-                    to: town,
-                    good: GoodId::Grain,
-                    quantity: load,
-                    via_merchant: merchant_id,
-                },
-                None,
-            );
-            self.world.merchant.location = MerchantLocation::At(village);
-            return;
-        }
-
-        // At town after a multi-day leg: head back to the village when imports are still needed.
-        if town_needs_imports && village_can_export && passable {
-            self.world.merchant.location = MerchantLocation::At(village);
-        }
-    }
-
     pub fn run_days(&mut self, days: u32) {
         for _ in 0..days {
             self.advance_day();
         }
+    }
+}
+
+/// Abstract regional tax/tithing credited daily so local wages remain payable without minting coin on NPCs.
+fn credit_settlement_treasuries(world: &mut WorldState) {
+    for settlement in &mut world.settlements {
+        let inflow = settlement.population.saturating_mul(2);
+        settlement.treasury_coin = settlement.treasury_coin.saturating_add(inflow);
     }
 }

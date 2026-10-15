@@ -150,6 +150,36 @@ pub enum WorldEvent {
         topic: String,
         cause: CauseId,
     },
+    MerchantDeparted {
+        from: SettlementId,
+        to: SettlementId,
+        grain: u32,
+        via_merchant: PersonId,
+    },
+    MerchantArrived {
+        settlement: SettlementId,
+        via_merchant: PersonId,
+    },
+    MerchantSaleCompleted {
+        settlement: SettlementId,
+        grain: u32,
+        coin: u32,
+        via_merchant: PersonId,
+    },
+    MerchantTripCancelled {
+        reason: String,
+        cause: Option<CauseId>,
+    },
+    RouteTransitAdjusted {
+        route: RouteId,
+        new_days: u32,
+        cause: CauseId,
+    },
+    WagePaidFromTreasury {
+        settlement: SettlementId,
+        person: PersonId,
+        amount: u32,
+    },
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Debug)]

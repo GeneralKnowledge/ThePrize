@@ -1,5 +1,7 @@
 use crate::economy::snapshot_settlement;
 use crate::events::{InterventionKind, WorldEvent};
+use crate::history::{ancestors_of, canonical_history_digest, descendants_of, find_cause_for_event};
+use crate::ledger::GrainLedger;
 use crate::persistence::{persist_run, RunPersistence};
 use crate::simulation::{ScheduledIntervention, SimulationConfig, WorldSimulator};
 use crate::world::initial_world;
@@ -31,6 +33,11 @@ pub struct ScenarioMetrics {
     pub final_town_grain: u32,
     pub total_grain_produced: u64,
     pub total_grain_consumed: u64,
+    pub merchant_departures: u32,
+    pub merchant_arrivals: u32,
+    pub merchant_sales: u32,
+    pub merchant_trip_cancellations: u32,
+    pub history_digest: u64,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -187,6 +194,23 @@ fn compute_metrics(sim: &WorldSimulator, min_village: u32, min_town: u32) -> Sce
         }
     }
 
+    let merchant_departures = sim
+        .log
+        .events_of_kind(|e| matches!(e, WorldEvent::MerchantDeparted { .. }))
+        .count() as u32;
+    let merchant_arrivals = sim
+        .log
+        .events_of_kind(|e| matches!(e, WorldEvent::MerchantArrived { .. }))
+        .count() as u32;
+    let merchant_sales = sim
+        .log
+        .events_of_kind(|e| matches!(e, WorldEvent::MerchantSaleCompleted { .. }))
+        .count() as u32;
+    let merchant_trip_cancellations = sim
+        .log
+        .events_of_kind(|e| matches!(e, WorldEvent::MerchantTripCancelled { .. }))
+        .count() as u32;
+
     ScenarioMetrics {
         merchant_transfers,
         npc_travel_events,
@@ -200,27 +224,90 @@ fn compute_metrics(sim: &WorldSimulator, min_village: u32, min_town: u32) -> Sce
         final_town_grain: sim.world.settlement(crate::ids::SettlementId(1)).grain_inventory,
         total_grain_produced: produced,
         total_grain_consumed: consumed,
+        merchant_departures,
+        merchant_arrivals,
+        merchant_sales,
+        merchant_trip_cancellations,
+        history_digest: canonical_history_digest(&sim.log),
     }
 }
 
 fn summarize_causal_chain(sim: &WorldSimulator) -> Vec<String> {
     let mut lines = vec![];
-    if let Some(block) = sim
-        .log
-        .events_of_kind(|e| matches!(e, WorldEvent::RouteBlocked { .. }))
-        .next()
+    let ledger = GrainLedger::from_event_log(&sim.log);
+    lines.push(format!(
+        "Grain ledger: produced {} | npc food {} | merchant delivered {} | alt hauls {} | thefts {}",
+        ledger.produced,
+        ledger.total_npc_food(),
+        ledger.merchant_delivered,
+        ledger.alt_hauls,
+        ledger.thefts
+    ));
+
+    if let Some(block_cause) =
+        find_cause_for_event(&sim.log, |e| matches!(e, WorldEvent::RouteBlocked { .. }))
     {
-        lines.push(format!("Day {}: bridge route blocked (cause {:?})", block.day, block.cause));
+        if let Some(block) = sim
+            .log
+            .events_of_kind(|e| matches!(e, WorldEvent::RouteBlocked { .. }))
+            .next()
+        {
+            lines.push(format!(
+                "Day {}: bridge blocked (cause {:?})",
+                block.day, block.cause
+            ));
+        }
+        let effects = descendants_of(&sim.log, block_cause);
+        let notable: Vec<_> = effects
+            .iter()
+            .filter(|l| {
+                l.description.contains("Merchant")
+                    || l.description.contains("RouteTransit")
+                    || l.description.contains("PriceAdjusted")
+                    || l.description.contains("NpcTravel")
+            })
+            .take(8)
+            .map(|l| format!("  day {}: {}", l.day, l.description))
+            .collect();
+        if !notable.is_empty() {
+            lines.push("Downstream of block (sample):".into());
+            lines.extend(notable);
+        }
+        if let Some(transfer) = sim
+            .log
+            .events_of_kind(|e| matches!(e, WorldEvent::GoodsTransferred { .. }))
+            .find(|r| r.day > BRIDGE_BLOCK_DAY)
+        {
+            if let Some(anc) = transfer.parent_cause {
+                let chain = ancestors_of(&sim.log, anc);
+                if chain.len() > 1 {
+                    lines.push(format!(
+                        "Sample delivery day {} linked through {} causal steps",
+                        transfer.day,
+                        chain.len()
+                    ));
+                }
+            }
+        }
     }
-    let transfers_after_block = sim
+
+    let departures = sim
         .log
-        .events_of_kind(|e| matches!(e, WorldEvent::GoodsTransferred { .. }))
-        .filter(|r| r.day > BRIDGE_BLOCK_DAY)
+        .events_of_kind(|e| matches!(e, WorldEvent::MerchantDeparted { .. }))
+        .count();
+    let sales = sim
+        .log
+        .events_of_kind(|e| matches!(e, WorldEvent::MerchantSaleCompleted { .. }))
         .count();
     lines.push(format!(
-        "Merchant crossings after day {}: {}",
-        BRIDGE_BLOCK_DAY, transfers_after_block
+        "Merchant: {} departures, {} completed sales, {} trip cancellations",
+        departures,
+        sales,
+        sim.log
+            .events_of_kind(|e| matches!(e, WorldEvent::MerchantTripCancelled { .. }))
+            .count()
     ));
+
     let hauls = sim
         .log
         .events_of_kind(|e| matches!(e, WorldEvent::AlternativeRouteUsed { .. }))
@@ -237,9 +324,10 @@ fn summarize_causal_chain(sim: &WorldSimulator) -> Vec<String> {
         lines.push("Bridge was repaired before simulation end.".into());
     }
     let town = snapshot_settlement(sim.world.settlement(crate::ids::SettlementId(1)));
+    let village = snapshot_settlement(sim.world.settlement(crate::ids::SettlementId(0)));
     lines.push(format!(
-        "Millford end state: {} grain, price {:.2}",
-        town.grain, town.price
+        "End state — Hollowbrook: {} grain @ {:.2}; Millford: {} grain @ {:.2}",
+        village.grain, village.price, town.grain, town.price
     ));
     lines
 }
