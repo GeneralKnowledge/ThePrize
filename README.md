@@ -39,6 +39,10 @@ cargo test
 
 Acceptance checks verify that disruption and interventions produce distinguishable, explainable outcomes versus baseline.
 
+## M3 consequences
+
+Actions go through `apply_world_action` (`WorldAction`: bridge/property damage, theft, kill). Properties can change hands on death; guards and witnesses get memories. Use `history::trace_from_cause` to inspect chains.
+
 ## Roadmap
 
-See design doc in project issue / GDD: next steps are autonomous NPC decisions (M2), full consequence chains (M3), then Bevy client (M4).
+M4: Bevy playable slice. M5: rumour discovery and objective history UI.
