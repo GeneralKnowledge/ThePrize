@@ -1,4 +1,5 @@
 use crate::ids::{CauseId, EventId, EventRecordId, PersonId, RouteId, SettlementId};
+use crate::npc::{DecisionReason, Job};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Debug)]
@@ -76,6 +77,37 @@ pub enum WorldEvent {
     },
     PlayerIntervention {
         kind: InterventionKind,
+    },
+    NpcAte {
+        person: PersonId,
+        settlement: SettlementId,
+        grain: u32,
+    },
+    NpcBoughtFood {
+        person: PersonId,
+        settlement: SettlementId,
+        grain: u32,
+        coin_spent: u32,
+    },
+    NpcWorked {
+        person: PersonId,
+        settlement: SettlementId,
+        job: Job,
+        wage: u32,
+        reason: DecisionReason,
+    },
+    NpcTravelStarted {
+        person: PersonId,
+        from: SettlementId,
+        to: SettlementId,
+        reason: DecisionReason,
+    },
+    NpcTravelArrived {
+        person: PersonId,
+        settlement: SettlementId,
+    },
+    NpcStarving {
+        person: PersonId,
     },
 }
 

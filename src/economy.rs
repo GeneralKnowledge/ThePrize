@@ -1,4 +1,5 @@
 use crate::events::{EventLog, GoodId, Season, WorldEvent};
+use crate::ids::SettlementId;
 use crate::world::{Settlement, WorldState};
 
 const MIN_PRICE: f64 = 0.25;
@@ -40,9 +41,24 @@ pub fn update_prices(world: &mut WorldState, log: &mut EventLog) {
 
 pub fn run_production(world: &mut WorldState, log: &mut EventLog, season: Season) {
     let mult = season.farm_yield_multiplier();
+    let labor: Vec<(SettlementId, f64)> = world
+        .settlements
+        .iter()
+        .map(|s| {
+            (
+                s.id,
+                crate::npc::decisions::farmer_work_fraction(world, s.id),
+            )
+        })
+        .collect();
     for settlement in &mut world.settlements {
+        let labor = labor
+            .iter()
+            .find(|(id, _)| *id == settlement.id)
+            .map(|(_, l)| *l)
+            .unwrap_or(1.0);
         let base = settlement.farm_daily_capacity;
-        let produced = ((base as f64) * mult).floor() as u32;
+        let produced = ((base as f64) * mult * labor).floor() as u32;
         if produced > 0 {
             settlement.grain_inventory = settlement.grain_inventory.saturating_add(produced);
             log.emit(

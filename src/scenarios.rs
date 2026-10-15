@@ -20,6 +20,7 @@ pub enum ScenarioKind {
 #[derive(Clone, Debug, Serialize)]
 pub struct ScenarioMetrics {
     pub merchant_transfers: u32,
+    pub npc_travel_events: u32,
     pub alternative_hauls: u32,
     pub starved_events: u32,
     pub route_blocked_days: u32,
@@ -126,13 +127,22 @@ fn compute_metrics(sim: &WorldSimulator, min_village: u32, min_town: u32) -> Sce
         .log
         .events_of_kind(|e| matches!(e, WorldEvent::GoodsTransferred { .. }))
         .count() as u32;
+    let npc_travel_events = sim
+        .log
+        .events_of_kind(|e| matches!(e, WorldEvent::NpcTravelStarted { .. }))
+        .count() as u32;
     let alternative_hauls = sim
         .log
         .events_of_kind(|e| matches!(e, WorldEvent::AlternativeRouteUsed { .. }))
         .count() as u32;
     let starved_events = sim
         .log
-        .events_of_kind(|e| matches!(e, WorldEvent::PopulationStarved { .. }))
+        .events_of_kind(|e| {
+            matches!(
+                e,
+                WorldEvent::PopulationStarved { .. } | WorldEvent::NpcStarving { .. }
+            )
+        })
         .count() as u32;
 
     let mut route_blocked_days = 0u32;
@@ -167,12 +177,15 @@ fn compute_metrics(sim: &WorldSimulator, min_village: u32, min_town: u32) -> Sce
         match &record.event {
             WorldEvent::GoodsProduced { quantity, .. } => produced += *quantity as u64,
             WorldEvent::GoodsConsumed { quantity, .. } => consumed += *quantity as u64,
+            WorldEvent::NpcAte { grain, .. } => consumed += *grain as u64,
+            WorldEvent::NpcBoughtFood { grain, .. } => consumed += *grain as u64,
             _ => {}
         }
     }
 
     ScenarioMetrics {
         merchant_transfers,
+        npc_travel_events,
         alternative_hauls,
         starved_events,
         route_blocked_days,
@@ -259,10 +272,12 @@ pub fn run_all_scenarios(seed: u64, output_dir: Option<&Path>) -> ScenarioCompar
 
 fn metrics_differ(a: &ScenarioMetrics, b: &ScenarioMetrics) -> bool {
     a.merchant_transfers != b.merchant_transfers
+        || a.npc_travel_events != b.npc_travel_events
         || a.starved_events != b.starved_events
         || a.final_town_grain != b.final_town_grain
         || a.final_village_grain != b.final_village_grain
         || a.min_town_grain != b.min_town_grain
         || a.alternative_hauls != b.alternative_hauls
         || a.bridge_repaired != b.bridge_repaired
+        || a.route_blocked_days != b.route_blocked_days
 }

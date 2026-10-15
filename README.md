@@ -2,7 +2,7 @@
 
 Simulation-first medieval sandbox RPG — **headless valley experiment** (M1 foundation).
 
-Two settlements (**Hollowbrook** village, **Millford** market town) share one economy, one bridge, and one travelling merchant. The simulation advances one day at a time with typed world events and causal links.
+Two settlements (**Hollowbrook** village, **Millford** market town) share one economy, one bridge, and one travelling merchant. **40 NPCs** (24 + 16) have jobs, hunger, personal stores, goals, beliefs, and **explainable daily decisions** (eat, buy food, work, travel). The simulation advances one day at a time with typed world events and causal links.
 
 ## Run scenarios
 
