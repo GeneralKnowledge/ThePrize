@@ -8,6 +8,7 @@ pub enum NpcAction {
     Travel,
     WaitOutTravel,
     Idle,
+    StealFood,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Debug)]
@@ -22,6 +23,7 @@ pub enum DecisionReason {
     BridgeBlocked,
     Travelling,
     Rested,
+    DesperateTheft,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]

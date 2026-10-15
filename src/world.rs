@@ -1,5 +1,6 @@
 use crate::ids::{PersonId, RouteId, SettlementId};
 use crate::npc::Npc;
+use crate::property::Property;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -9,8 +10,9 @@ pub struct Settlement {
     pub population: u32,
     /// Grain stored for food (kg abstract units).
     pub grain_inventory: u32,
-    /// Daily grain output capacity at full season multiplier.
+    /// Daily grain output capacity at full season multiplier (after property effects).
     pub farm_daily_capacity: u32,
+    pub base_farm_daily_capacity: u32,
     /// Desired grain buffer for pricing (days of consumption at current pop).
     pub market: MarketState,
 }
@@ -61,6 +63,9 @@ pub struct WorldState {
     pub routes: Vec<Route>,
     pub merchant: Merchant,
     pub npcs: Vec<Npc>,
+    pub properties: Vec<Property>,
+    /// Actions queued during NPC decisions, applied before production.
+    pub pending_actions: Vec<crate::world_action::WorldAction>,
     /// Grain per person per day.
     pub grain_per_person_per_day: f64,
 }
@@ -121,6 +126,8 @@ pub fn initial_world() -> WorldState {
         day: 0,
         grain_per_person_per_day: 0.65,
         npcs: vec![],
+        properties: vec![],
+        pending_actions: vec![],
         settlements: vec![
             Settlement {
                 id: village,
@@ -128,6 +135,7 @@ pub fn initial_world() -> WorldState {
                 population: 24,
                 grain_inventory: 220,
                 farm_daily_capacity: 32,
+                base_farm_daily_capacity: 32,
                 market: MarketState {
                     grain_price: 1.0,
                     desired_grain_stock: 100,
@@ -139,6 +147,7 @@ pub fn initial_world() -> WorldState {
                 population: 16,
                 grain_inventory: 70,
                 farm_daily_capacity: 1,
+                base_farm_daily_capacity: 1,
                 market: MarketState {
                     grain_price: 1.35,
                     desired_grain_stock: 55,
@@ -165,5 +174,11 @@ pub fn initial_world() -> WorldState {
         },
     };
     crate::npc::population::populate_npcs(&mut world);
+    world.properties = crate::property::initial_properties(&world);
+    let props = world.properties.clone();
+    for settlement in &mut world.settlements {
+        settlement.farm_daily_capacity = settlement.base_farm_daily_capacity;
+        crate::property::apply_property_effects_to_settlement(settlement, &props);
+    }
     world
 }

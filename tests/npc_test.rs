@@ -13,6 +13,7 @@ fn npcs_work_and_explain_decisions() {
             seed: 99,
             bridge_block_day: None,
             interventions: vec![],
+            scheduled_actions: vec![],
         },
     );
     let mut sim = sim;
@@ -45,6 +46,7 @@ fn npcs_buy_food_when_hungry() {
             seed: 3,
             bridge_block_day: None,
             interventions: vec![],
+            scheduled_actions: vec![],
         },
     );
     for _ in 0..45 {
@@ -91,6 +93,7 @@ fn garrick_pays_down_debt_or_works_for_it() {
             seed: 1,
             bridge_block_day: None,
             interventions: vec![],
+            scheduled_actions: vec![],
         },
     );
     for _ in 0..60 {

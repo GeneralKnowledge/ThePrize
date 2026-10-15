@@ -18,6 +18,7 @@ macro_rules! new_id {
 
 new_id!(SettlementId);
 new_id!(RouteId);
+new_id!(PropertyId);
 new_id!(PersonId);
 new_id!(CauseId);
 new_id!(EventId);

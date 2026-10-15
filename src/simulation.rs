@@ -1,8 +1,10 @@
+use crate::consequences::apply_world_action;
 use crate::economy::{run_production, update_prices, ConsumptionSummary};
 use crate::npc::decisions::{run_npc_decisions, tick_npc_hunger};
 use crate::npc::inform_bridge_blocked;
 use crate::events::{EventLog, GoodId, InterventionKind, Season, WorldEvent};
 use crate::ids::{RouteId, SettlementId};
+use crate::world_action::ScheduledAction;
 use crate::world::{MerchantLocation, WorldState};
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
@@ -11,6 +13,7 @@ pub struct SimulationConfig {
     pub seed: u64,
     pub bridge_block_day: Option<u32>,
     pub interventions: Vec<ScheduledIntervention>,
+    pub scheduled_actions: Vec<ScheduledAction>,
 }
 
 #[derive(Clone, Debug)]
@@ -54,9 +57,11 @@ impl WorldSimulator {
 
         self.apply_scheduled_disruptions(day);
         self.apply_scheduled_interventions(day);
+        self.apply_scheduled_actions(day);
 
         tick_npc_hunger(&mut self.world, &mut self.log);
         run_npc_decisions(&mut self.world, &mut self.log);
+        self.flush_pending_actions();
         run_production(&mut self.world, &mut self.log, season);
         self.tick_merchant(day);
         update_prices(&mut self.world, &mut self.log);
@@ -75,6 +80,26 @@ impl WorldSimulator {
                 None,
             );
             self.block_route(route, cause);
+        }
+    }
+
+    fn flush_pending_actions(&mut self) {
+        let pending = std::mem::take(&mut self.world.pending_actions);
+        for action in pending {
+            apply_world_action(self, action, None);
+        }
+    }
+
+    fn apply_scheduled_actions(&mut self, day: u32) {
+        let actions: Vec<_> = self
+            .config
+            .scheduled_actions
+            .iter()
+            .filter(|a| a.day == day)
+            .cloned()
+            .collect();
+        for scheduled in actions {
+            apply_world_action(self, scheduled.action, None);
         }
     }
 

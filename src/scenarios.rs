@@ -87,11 +87,13 @@ fn config_for(kind: ScenarioKind, seed: u64) -> SimulationConfig {
             seed,
             bridge_block_day: None,
             interventions: vec![],
+            scheduled_actions: vec![],
         },
         ScenarioKind::Disruption => SimulationConfig {
             seed,
             bridge_block_day: Some(BRIDGE_BLOCK_DAY),
             interventions: vec![],
+            scheduled_actions: vec![],
         },
         ScenarioKind::InterventionRepair => SimulationConfig {
             seed,
@@ -100,11 +102,13 @@ fn config_for(kind: ScenarioKind, seed: u64) -> SimulationConfig {
                 day: BRIDGE_BLOCK_DAY + 14,
                 kind: InterventionKind::RepairBridge,
             }],
+            scheduled_actions: vec![],
         },
         ScenarioKind::InterventionHaul => SimulationConfig {
             seed,
             bridge_block_day: Some(BRIDGE_BLOCK_DAY),
             interventions: weekly_hauls(BRIDGE_BLOCK_DAY + 7, BRIDGE_BLOCK_DAY + 120),
+            scheduled_actions: vec![],
         },
     }
 }
