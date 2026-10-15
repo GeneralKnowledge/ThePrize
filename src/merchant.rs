@@ -6,6 +6,10 @@ const VILLAGE: SettlementId = SettlementId(0);
 const TOWN: SettlementId = SettlementId(1);
 const BRIDGE: RouteId = RouteId(0);
 
+fn uses_bridge(from: SettlementId, to: SettlementId) -> bool {
+    (from == VILLAGE && to == TOWN) || (from == TOWN && to == VILLAGE)
+}
+
 pub fn on_route_blocked(world: &mut WorldState, log: &mut EventLog, cause: CauseId) {
     let MerchantLocation::Travelling {
         from,
@@ -16,24 +20,31 @@ pub fn on_route_blocked(world: &mut WorldState, log: &mut EventLog, cause: Cause
     else {
         return;
     };
-    if days_remaining <= 1 && !world.route(BRIDGE).passable {
-        let ford_days = world.route(BRIDGE).alternative_travel_days.max(2);
-        world.merchant.location = MerchantLocation::Travelling {
-            from,
-            to,
-            days_remaining: ford_days,
-            carrying_grain,
-        };
-        log.emit(
-            world.day,
-            WorldEvent::RouteTransitAdjusted {
-                route: BRIDGE,
-                new_days: ford_days,
-                cause,
-            },
-            Some(cause),
-        );
+    if !uses_bridge(from, to) {
+        return;
     }
+    if world.route(BRIDGE).passable {
+        return;
+    }
+    let ford_days = world.route(BRIDGE).alternative_travel_days.max(2);
+    if days_remaining >= ford_days {
+        return;
+    }
+    world.merchant.location = MerchantLocation::Travelling {
+        from,
+        to,
+        days_remaining: ford_days,
+        carrying_grain,
+    };
+    log.emit(
+        world.day,
+        WorldEvent::RouteTransitAdjusted {
+            route: BRIDGE,
+            new_days: ford_days,
+            cause,
+        },
+        Some(cause),
+    );
 }
 
 pub fn tick_merchant(world: &mut WorldState, log: &mut EventLog, day: u32) {
@@ -119,27 +130,41 @@ pub fn tick_merchant(world: &mut WorldState, log: &mut EventLog, day: u32) {
         let buy_price = world.settlement(VILLAGE).market.grain_price;
         let cost = (load as f64 * buy_price).ceil() as u32;
         if world.merchant.coin < cost {
+            log.emit(
+                day,
+                WorldEvent::MerchantTripCancelled {
+                    reason: "insufficient coin for cargo".into(),
+                    cause: None,
+                },
+                None,
+            );
             return;
         }
         world.merchant.coin -= cost;
         world.settlement_mut(VILLAGE).grain_inventory -= load;
-        let travel_days = if passable { 1 } else { world.route(BRIDGE).alternative_travel_days };
+        let travel_days = if passable {
+            1
+        } else {
+            world.route(BRIDGE).alternative_travel_days
+        };
         world.merchant.location = MerchantLocation::Travelling {
             from: VILLAGE,
             to: TOWN,
             days_remaining: travel_days,
             carrying_grain: load,
         };
-        log.emit(
+        let (_, trip_cause) = log.emit(
             day,
             WorldEvent::MerchantDeparted {
                 from: VILLAGE,
                 to: TOWN,
                 grain: load,
+                coin_spent: cost,
                 via_merchant: merchant_id,
             },
             None,
         );
+        world.merchant.active_trip_cause = Some(trip_cause);
         return;
     }
 
@@ -150,16 +175,18 @@ pub fn tick_merchant(world: &mut WorldState, log: &mut EventLog, day: u32) {
             days_remaining: 1,
             carrying_grain: 0,
         };
-        log.emit(
+        let (_, trip_cause) = log.emit(
             day,
             WorldEvent::MerchantDeparted {
                 from: TOWN,
                 to: VILLAGE,
                 grain: 0,
+                coin_spent: 0,
                 via_merchant: merchant_id,
             },
             None,
         );
+        world.merchant.active_trip_cause = Some(trip_cause);
     }
 }
 
@@ -172,6 +199,7 @@ fn arrive(
     to: SettlementId,
     carrying_grain: u32,
 ) {
+    let trip_cause = world.merchant.active_trip_cause.take();
     world.merchant.location = MerchantLocation::At(to);
     log.emit(
         day,
@@ -179,7 +207,7 @@ fn arrive(
             settlement: to,
             via_merchant: merchant_id,
         },
-        None,
+        trip_cause,
     );
 
     if carrying_grain == 0 {
@@ -202,7 +230,7 @@ fn arrive(
             quantity: delivered,
             via_merchant: merchant_id,
         },
-        None,
+        trip_cause,
     );
     log.emit(
         day,
@@ -212,6 +240,6 @@ fn arrive(
             coin: sale,
             via_merchant: merchant_id,
         },
-        None,
+        trip_cause,
     );
 }

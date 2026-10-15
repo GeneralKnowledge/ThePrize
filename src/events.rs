@@ -154,6 +154,7 @@ pub enum WorldEvent {
         from: SettlementId,
         to: SettlementId,
         grain: u32,
+        coin_spent: u32,
         via_merchant: PersonId,
     },
     MerchantArrived {

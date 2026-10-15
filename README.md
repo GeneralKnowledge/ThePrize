@@ -2,7 +2,7 @@
 
 Simulation-first medieval sandbox RPG — **headless valley experiment** (M1–M3).
 
-Two settlements (**Hollowbrook** village, **Millford** market town) share one economy, one bridge, and one travelling merchant (**Corvin the Carter**). **40 NPCs** (24 + 16) have jobs, hunger, personal stores, goals, beliefs, and **explainable daily decisions** (eat, buy food, work, travel). The simulation advances one day at a time with typed `WorldEvent` records, `CauseId` links, and SQLite run archives.
+Two settlements (**Hollowbrook** village, **Millford** market town) share one economy, one bridge, and one travelling merchant (**Corvin the Carter**). **40 NPCs** (24 + 16) have jobs, hunger, personal stores, goals, beliefs, and **explainable daily decisions** (eat, buy food, work, travel). The simulation advances one day at a time with typed `WorldEvent` records, `CauseId` links, SQLite run archives, **integrity validation**, and **canonical snapshots** for reproducibility testing.
 
 ## Run scenarios
 

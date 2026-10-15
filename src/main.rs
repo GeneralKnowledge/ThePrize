@@ -106,9 +106,25 @@ fn print_report(report: &living_world::scenarios::ScenarioReport) {
         m.route_blocked_days, m.bridge_repaired
     );
     println!(
-        "  produced {} / consumed {} grain over year",
-        m.total_grain_produced, m.total_grain_consumed
+        "  grain: produced {} | eaten {} | market purchases {} | conservation Δ {}",
+        m.total_grain_produced,
+        m.grain_food_consumed,
+        m.grain_market_purchased,
+        m.grain_conservation_imbalance
     );
+    println!(
+        "  money: wages {} | npc market spend {}",
+        m.wages_paid, m.npc_market_coin_spent
+    );
+    println!(
+        "  population {} → {} (deaths {}), integrity errors {} warnings {}",
+        m.population_start,
+        m.population_end,
+        m.npc_deaths,
+        m.integrity_errors,
+        m.integrity_warnings
+    );
+    println!("  snapshot digest: {:x}", m.snapshot_digest);
     for line in &report.causal_summary {
         println!("  · {}", line);
     }

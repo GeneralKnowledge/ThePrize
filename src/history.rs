@@ -116,6 +116,29 @@ pub fn summarize_bridge_collapse(log: &EventLog) -> Vec<String> {
 }
 
 /// Stable fingerprint for regression: day + event debug + parent cause per record.
+/// Returns invalid parent references or self-parent links.
+pub fn validate_cause_graph(log: &EventLog) -> Vec<String> {
+    let mut known = std::collections::HashSet::new();
+    for record in &log.records {
+        known.insert(record.cause);
+    }
+    let mut problems = vec![];
+    for record in &log.records {
+        if let Some(parent) = record.parent_cause {
+            if parent == record.cause {
+                problems.push(format!("self-parent on cause {:?}", record.cause));
+            }
+            if !known.contains(&parent) {
+                problems.push(format!(
+                    "orphan parent {:?} on event {:?}",
+                    parent, record.id
+                ));
+            }
+        }
+    }
+    problems
+}
+
 pub fn canonical_history_digest(log: &EventLog) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
